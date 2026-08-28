@@ -1,5 +1,7 @@
 # sql
 
+> ⚠ ponytail 끄고 작업할 것 — `03_seed_ratings.sql`은 의도적 복잡도 (`CLAUDE.md` ponytail 섹션 참고)
+
 | 파일 | 역할 |
 |---|---|
 | `01_schema.sql` | 테이블 4개 생성 (overview, movie_vector 제외) |

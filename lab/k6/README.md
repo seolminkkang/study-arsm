@@ -1,5 +1,7 @@
 # k6
 
+> ⚠ ponytail 끄고 작업할 것 — 의도적 복잡도 (`CLAUDE.md` ponytail 섹션 참고)
+
 도착률(arrival rate) 기반으로 짠다. 이유는 `lab/README.md` ⑦ 참고.
 
 | 파일 | 실험 |

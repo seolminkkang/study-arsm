@@ -10,11 +10,12 @@ services:
       - "${POSTGRES_PORT:-5433}:5432"
     volumes:
       - lab_pgdata:/var/lib/postgresql/data
+    shm_size: "256mb"
     deploy:
       resources:
         limits:
           cpus: "2"
-          memory: 1g
+          memory: 2g
 
 volumes:
   lab_pgdata:
