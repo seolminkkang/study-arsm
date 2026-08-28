@@ -1,0 +1,20 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: lab-postgres
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-labdb}
+      POSTGRES_USER: ${POSTGRES_USER:-lab}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-lab}
+    ports:
+      - "${POSTGRES_PORT:-5433}:5432"
+    volumes:
+      - lab_pgdata:/var/lib/postgresql/data
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 1g
+
+volumes:
+  lab_pgdata:

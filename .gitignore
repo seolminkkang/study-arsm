@@ -1,0 +1,29 @@
+# 대용량 원본 덤프 — 스크립트만 커밋한다
+lab/sql/dump/
+*.dump
+*.sql.gz
+
+# 비밀
+.env
+*.env
+application-local.yml
+**/secrets/
+
+# 빌드
+build/
+target/
+.gradle/
+*.jar
+
+# 옵시디언 로컬 상태 (플러그인 설정은 공유해도 됨)
+vault/.obsidian/workspace.json
+vault/.obsidian/workspace-mobile.json
+vault/.trash/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Quartz (나중에 붙일 때)
+public/
+.quartz-cache/
