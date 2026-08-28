@@ -16,13 +16,26 @@ tags: [plan]
 ```
 DB      : PostgreSQL 16, CPU 2, mem 2g
 앱      : Spring Boot, CPU 2, mem 1g, HikariCP 기본 10
-데이터  : movies 19,731 / user_rating 5,000,000
+데이터  : movies 19,701 / genres 19 / movie_genres 47,104 / user_rating 5,030,000
 워밍업  : 60초 (JVM JIT. 이 구간 결과는 버린다)
 판정    : before/after 3배 이상 차이나면 성공
 ```
 
+데이터 건수는 2026-08-28 파일럿 기준 실측값이다. `lab/README.md`에 적었던
+예상치(19,731 / 49 / 144,741)와 다르다 — genres는 단순 오기, movie_genres는
+원본 덤프 세 파일의 export 시각이 서로 달라서(최대 45분 차이) 생긴 실제
+데이터 불일치다. 자세한 내용은 `lab/sql/README.md` 참고.
+
 `ANALYZE user_rating;` 을 시딩 후, 그리고 인덱스를 바꿀 때마다 실행한다.
 통계가 오래되면 옵티마이저가 옛날 정보로 판단해서 실행계획이 이상하게 나온다.
+
+**테스트 ID (2026-08-28 파일럿 기준 — 재시딩하면 값이 바뀐다. `00_find_test_ids.sql`로 다시 찾을 것)**
+
+```
+헤비ID     : 36     (5,000건)
+라이트ID   : 46401  (17건)
+인기영화ID : 60300  (10,339건 평점)
+```
 
 ---
 
@@ -36,45 +49,80 @@ DB      : PostgreSQL 16, CPU 2, mem 2g
 
 Moha 원본에는 varchar↔int 조인이 없으므로 실습용 칼럼을 하나 만든다.
 
+**주의: 캐스팅 방향이 핵심이다.** 캐스팅이 인덱스 없는 쪽 컬럼에 걸리면
+인덱스가 정상적으로 탄다 — "안 탄다"를 보여주려면 캐스팅이 반드시
+**인덱스가 걸린 컬럼**(`movie_id_str`) 쪽에 있어야 한다.
+2026-08-28 파일럿에서 `r.movie_id_str = m.movie_id::varchar`로 썼다가
+인덱스가 잘 타버려서 걸렸다 — `m.movie_id`(인덱스 없음) 쪽을 캐스팅했기 때문.
+
 ```sql
 ALTER TABLE user_rating ADD COLUMN movie_id_str varchar(20);
 UPDATE user_rating SET movie_id_str = movie_id::text;
 CREATE INDEX idx_rating_movie_str ON user_rating(movie_id_str);
 ANALYZE user_rating;
 
--- 인덱스를 타는 쪽
+-- 인덱스를 타는 쪽 (movie_id_str에 직접 비교, 실존하는 movie_id로)
 EXPLAIN ANALYZE
-SELECT * FROM user_rating WHERE movie_id_str = '42';
+SELECT * FROM user_rating WHERE movie_id_str = '60300';
 
--- 타입이 안 맞는 쪽 (인덱스가 있는데도)
+-- 타입이 안 맞는 쪽: 캐스팅이 인덱스 걸린 컬럼(movie_id_str)에 걸린다
 EXPLAIN ANALYZE
-SELECT r.* FROM user_rating r JOIN movies m ON r.movie_id_str = m.movie_id::varchar
-WHERE m.movie_id = 42;
+SELECT r.* FROM user_rating r JOIN movies m ON r.movie_id_str::int = m.movie_id
+WHERE m.movie_id = 60300;
 ```
 
-**볼 것:** `Seq Scan`이 뜨는지, 각 행마다 타입 변환이 일어나는지
+**볼 것:** `Seq Scan`(또는 `Parallel Seq Scan`)이 뜨는지, `Filter`에 타입 변환이 걸려 있는지
 
-## B-2. 선택도
+쿼리에 쓰는 movie_id는 실제로 존재하는 값이어야 한다(`42`는 이 데이터셋에 없어서
+두 쿼리 다 0행이 나와 비교가 안 됐다). `00_find_test_ids.sql`로 확인한 값을 쓴다.
 
-**보여줄 것:** 같은 쿼리인데 조회 대상에 따라 실행계획이 달라진다
+## B-2. 선택도 — 전환점 찾기
+
+**최초 설계(헤비 vs 라이트 유저 비교)는 2026-08-28 파일럿에서 실패했다.**
+헤비 유저도 5,000/5,030,000 = 0.1%라 라이트 유저(17건)와 마찬가지로
+그냥 Index Scan을 탔다. `user_id`는 값이 10만 개가 넘는 컬럼이라
+애초에 어떤 한 값을 찍어도 선택도가 매우 높다 — 두 값을 비교하는 걸로는
+Seq Scan 전환점이 안 보인다. 그래서 **"두 값 비교"가 아니라
+"조회 대상 비율을 올려가며 전환점을 찾는" 실험으로 바꾼다.**
+
+**보여줄 것:** 조회 대상 비율이 커질수록 Index Scan → Seq Scan으로 바뀐다
 
 ```sql
--- 헤비 유저 (5,000건)
+-- 약 0.1%  (user_id 1명)
 EXPLAIN ANALYZE
-SELECT movie_id, rating FROM user_rating WHERE user_id = <헤비ID>;
+SELECT movie_id, rating FROM user_rating WHERE user_id = 1;
 
--- 라이트 유저 (17건)
+-- 약 1%    (user_id 10명)
 EXPLAIN ANALYZE
-SELECT movie_id, rating FROM user_rating WHERE user_id = <라이트ID>;
+SELECT movie_id, rating FROM user_rating WHERE user_id BETWEEN 1 AND 10;
+
+-- 약 10%   (user_id 100명)
+EXPLAIN ANALYZE
+SELECT movie_id, rating FROM user_rating WHERE user_id BETWEEN 1 AND 100;
+
+-- 약 30%   (user_id 1,000명)
+EXPLAIN ANALYZE
+SELECT movie_id, rating FROM user_rating WHERE user_id BETWEEN 1 AND 1000;
 ```
 
-**볼 것:** `rows` 추정치와 실제값의 차이, 인덱스 스캔 vs 시퀀셜 스캔 전환점
+user_id 1~100은 전부 헤비 유저(각 5,000건)라 위 비율은 대략적인 값이다.
+실제 비율은 각 단계에서 `count(*)`로 확인하고 노트에 적는다.
 
-시딩을 균등 분포로 하면 이 실험이 통째로 죽는다. 누구를 조회하든 건수가 같아지기 때문.
+**볼 것:**
+- 어느 비율에서 `Index Scan`이 `Seq Scan`(또는 `Bitmap Heap Scan`)으로 바뀌는가
+- 옵티마이저의 `rows` 추정치와 실제 `rows` 값의 차이가 비율이 커질수록 어떻게 변하는가
 
 ## B-3. 커버링 인덱스
 
 **보여줄 것:** 필요한 칼럼이 전부 인덱스에 있으면 테이블을 안 읽는다
+
+**전제조건 — 반드시 먼저 실행:**
+```sql
+VACUUM user_rating;
+```
+**시딩 직후에는 `ANALYZE`만으로 부족하다.** 대량 INSERT 후 visibility map이
+채워지지 않은 상태라 `Index Only Scan`이 아예 안 나오고 `Bitmap Heap Scan`으로만
+나온다(2026-08-28 파일럿에서 확인). `VACUUM`을 빼면 이 실습은 실패한다.
 
 `(movie_id, rating)` 인덱스가 이미 있다.
 
@@ -110,9 +158,24 @@ ANALYZE user_rating;
 CREATE INDEX idx_test_reversed ON user_rating(updated_at DESC, user_id);
 ANALYZE user_rating;
 -- 같은 쿼리 재실행
+
+-- 네 번째 조건: ORDER BY / LIMIT을 뺀 같은 조건 (idx_test_reversed 있는 상태에서)
+EXPLAIN ANALYZE
+SELECT * FROM user_rating
+WHERE user_id = <헤비ID> AND updated_at >= '2026-01-01';
 ```
 
-**볼 것:** 셋의 실행 시간과 스캔 행 수
+**볼 것:** 네 조건의 실행 시간과 스캔 행 수
+
+**2026-08-28 파일럿에서 나온, 계획에 없던 발견:**
+`ORDER BY updated_at DESC LIMIT 100`이 있으면 컬럼 순서를 뒤집은 인덱스
+(`updated_at DESC, user_id`)도 기존 인덱스와 거의 차이가 안 났다(2.3ms vs 2.7ms).
+`updated_at DESC`가 이미 정렬 순서와 일치해서, LIMIT이 스캔을 일찍 끊어주기 때문으로
+보인다(가설). 책은 "컬럼 순서가 중요하다"까지만 말하지만, 실측하면
+**"ORDER BY와 인덱스 선두 컬럼이 일치하는지에 따라 달라진다"**가 나온다.
+네 번째 조건(ORDER BY 없이)에서 이 가설이 맞는지 확인한다 — LIMIT의 조기 종료
+효과가 없어지면 순서를 뒤집은 인덱스가 진짜로 나빠지는지가 이 회차의 예측 소재다.
+둘 다 "뒤집으면 무조건 나빠진다"고 예측할 가능성이 높은데, 조건에 따라 틀린다.
 
 실험이 끝나면 원래 인덱스를 복구한다.
 
@@ -260,6 +323,11 @@ k6와 앱이 CPU를 두고 싸우므로 절대값을 믿을 수 없다.
 
 ## 체크리스트
 
+- [ ] DB 컨테이너 메모리가 2g인가 (1g면 `VACUUM`이 공유 메모리 부족으로 실패한다 —
+      2026-08-28 파일럿에서 `could not resize shared memory segment` 에러로 확인)
+- [ ] `shm_size`가 256mb 이상인가 (`docker-compose.yml`)
+- [ ] 쿼리에 쓰는 ID(헤비ID/라이트ID/인기영화ID)가 실제로 존재하는 값인가
+      (`00_find_test_ids.sql`로 재확인 — 시딩할 때마다 바뀐다)
 - [ ] B급 4개 쿼리가 전부 실행되고, 실행계획에 차이가 보이는가
 - [ ] A-1 ①의 쿼리가 충분히 느린가 (offset 0 대비 **3배 이상**)
 - [ ] ②의 계산값과 ③의 실측값이 실제로 다른가 (같으면 실험이 무의미)

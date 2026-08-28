@@ -43,10 +43,14 @@ user_rating  (user_id, movie_id, rating, created_at, updated_at)
 
 원본 덤프 위치 (원본 프로젝트의 `exec/sql_dump/`):
 ```
-movies/moha_movies_*.sql        19,731건
-movies/moha_genres_*.sql             49건
-movies/moha_movie_genres_*.sql  144,741건
+movies/moha_movies_*.sql        19,701건
+movies/moha_genres_*.sql             19건
+movies/moha_movie_genres_*.sql  144,696건  (movies에 실제 있는 movie_id만 남기면 47,104건)
 ```
+
+실측치다(2026-08-28). movie_genres는 원본 세 덤프 파일의 export 시각이 서로 달라서
+(최대 45분 차이) movies 정리 이후 값과 안 맞는 movie_id를 다수 참조한다 —
+자세한 내용은 `lab/sql/README.md` 참고.
 
 PostgreSQL `COPY ... FROM stdin` 형식이다. 칼럼을 골라 뽑아야 하므로
 awk로 `COPY` 블록만 추출해서 필요한 칼럼 인덱스만 남기는 방식이 무난하다.

@@ -1,0 +1,241 @@
+B급 EXPLAIN 파일럿 — 2026-08-28, 리허설(한 대), lab-postgres 컨테이너
+조건: PostgreSQL 16, movies 19,701 / genres 19 / movie_genres 47,104 / user_rating 5,030,000
+     인덱스: idx_user_rating__movie_rating(movie_id, rating), idx_user_rating__user_updated(user_id, updated_at DESC)
+     시딩 직후 ANALYZE user_rating; 실행됨. VACUUM은 B-3 항목에 별도 표시.
+     이 시점 git 커밋 없음(저장소 미초기화).
+
+================================================================
+B-1. 타입이 다른 칼럼 조인
+================================================================
+
+--- 준비 ---
+$ ALTER TABLE user_rating ADD COLUMN movie_id_str varchar(20);
+$ UPDATE user_rating SET movie_id_str = movie_id::text;
+$ CREATE INDEX idx_rating_movie_str ON user_rating(movie_id_str);
+$ ANALYZE user_rating;
+ALTER TABLE
+UPDATE 5030000
+CREATE INDEX
+ANALYZE
+
+--- [최초 시도 — 001-plan.md 원문 그대로. movie_id=42는 존재하지 않는 ID] ---
+
+EXPLAIN ANALYZE
+SELECT * FROM user_rating WHERE movie_id_str = '42';
+
+ Bitmap Heap Scan on user_rating  (cost=6.39..981.07 rows=253 width=39) (actual time=0.028..0.029 rows=0 loops=1)
+   Recheck Cond: ((movie_id_str)::text = '42'::text)
+   ->  Bitmap Index Scan on idx_rating_movie_str  (cost=0.00..6.33 rows=253 width=0) (actual time=0.025..0.025 rows=0 loops=1)
+         Index Cond: ((movie_id_str)::text = '42'::text)
+ Planning Time: 1.655 ms
+ Execution Time: 0.070 ms
+
+EXPLAIN ANALYZE
+SELECT r.* FROM user_rating r JOIN movies m ON r.movie_id_str = m.movie_id::varchar
+WHERE m.movie_id = 42;
+
+ Nested Loop  (cost=7.23..1253.73 rows=323 width=39) (actual time=0.317..0.318 rows=0 loops=1)
+   ->  Index Only Scan using movies_pkey on movies m  (cost=0.29..4.30 rows=1 width=8) (actual time=0.317..0.317 rows=0 loops=1)
+         Index Cond: (movie_id = 42)
+         Heap Fetches: 0
+   ->  Bitmap Heap Scan on user_rating r  (cost=6.94..1246.19 rows=323 width=39) (never executed)
+         Recheck Cond: ((movie_id_str)::text = ((m.movie_id)::character varying)::text)
+         ->  Bitmap Index Scan on idx_rating_movie_str  (cost=0.00..6.86 rows=323 width=0) (never executed)
+               Index Cond: ((movie_id_str)::text = ((m.movie_id)::character varying)::text)
+ Planning Time: 1.594 ms
+ Execution Time: 0.694 ms
+
+관찰: movie_id=42가 없어서 양쪽 다 0행. 게다가 캐스팅이 인덱스 없는 쪽(m.movie_id)에
+걸려서 인덱스가 이미 정상적으로 탐 — 계획서 쿼리가 "안 타는" 사례를 보여주지 못함.
+
+--- [수정 시도 — 실존 movie_id(60300), 캐스팅 방향을 인덱스 걸린 컬럼(movie_id_str)으로] ---
+
+EXPLAIN ANALYZE
+SELECT * FROM user_rating WHERE movie_id_str = '60300';
+
+ Bitmap Heap Scan on user_rating  (cost=161.44..31061.27 rows=10969 width=39) (actual time=1.963..364.245 rows=10339 loops=1)
+   Recheck Cond: ((movie_id_str)::text = '60300'::text)
+   Heap Blocks: exact=9315
+   ->  Bitmap Index Scan on idx_rating_movie_str  (cost=0.00..158.70 rows=10969 width=0) (actual time=1.127..1.128 rows=10339 loops=1)
+         Index Cond: ((movie_id_str)::text = '60300'::text)
+ Planning Time: 0.292 ms
+ Execution Time: 365.040 ms
+
+EXPLAIN ANALYZE
+SELECT r.* FROM user_rating r JOIN movies m ON r.movie_id_str::int = m.movie_id
+WHERE m.movie_id = 60300;
+
+ Nested Loop  (cost=1000.29..129632.23 rows=25314 width=39) (actual time=344.689..747.692 rows=10339 loops=1)
+   ->  Index Only Scan using movies_pkey on movies m  (cost=0.29..4.30 rows=1 width=8) (actual time=0.613..0.618 rows=1 loops=1)
+         Index Cond: (movie_id = 60300)
+         Heap Fetches: 0
+   ->  Gather  (cost=1000.00..129374.79 rows=25314 width=39) (actual time=344.064..746.121 rows=10339 loops=1)
+         Workers Planned: 2
+         Workers Launched: 2
+         ->  Parallel Seq Scan on user_rating r  (cost=0.00..125843.39 rows=10548 width=39) (actual time=332.744..718.513 rows=3446 loops=3)
+               Filter: ((movie_id_str)::integer = 60300)
+               Rows Removed by Filter: 1673220
+ Planning Time: 0.378 ms
+ JIT:
+   Functions: 8
+   Options: Inlining false, Optimization false, Expressions true, Deforming true
+   Timing: Generation 0.633 ms, Inlining 0.000 ms, Optimization 16.222 ms, Emission 22.902 ms, Total 39.757 ms
+ Execution Time: 775.864 ms
+
+관찰: Bitmap Index Scan(365ms) vs Parallel Seq Scan(776ms). Filter에
+"(movie_id_str)::integer = 60300" — 행마다 캐스팅이 걸리는 게 보임.
+(두 실행 시간 다 첫 실행이라 콜드캐시 영향 포함, 절대값 비교 주의)
+
+================================================================
+B-2. 선택도 — 헤비 vs 라이트 (최초 설계, 실패)
+================================================================
+
+EXPLAIN ANALYZE
+SELECT movie_id, rating FROM user_rating WHERE user_id = 36;   -- 헤비, 5,000건
+
+ Index Scan using idx_user_rating__user_updated on user_rating  (cost=0.43..8912.03 rows=5063 width=10) (actual time=0.941..9.219 rows=5000 loops=1)
+   Index Cond: (user_id = 36)
+ Planning Time: 4.487 ms
+ Execution Time: 9.383 ms
+
+EXPLAIN ANALYZE
+SELECT movie_id, rating FROM user_rating WHERE user_id = 46401; -- 라이트, 17건
+
+ Index Scan using idx_user_rating__user_updated on user_rating  (cost=0.43..417.69 rows=229 width=10) (actual time=1.341..1.350 rows=17 loops=1)
+   Index Cond: (user_id = 46401)
+ Planning Time: 0.539 ms
+ Execution Time: 1.417 ms
+
+관찰: 둘 다 Index Scan. 5,000/5,030,000 = 0.1%라 헤비 유저도 Seq Scan으로
+전환되지 않음 — 이 비교로는 선택도에 따른 실행계획 전환이 안 보임.
+rows 추정치(229) vs 실제(17) 차이는 라이트 쪽에서 관찰됨(약 13배 과대추정).
+→ 001-plan.md B-2를 "조회 비율을 올려가며 전환점 찾기"로 재설계함. 새 쿼리는
+  아직 파일럿에서 실행하지 않았다(당일/차기 리허설 몫).
+
+================================================================
+B-3. 커버링 인덱스
+================================================================
+
+--- [VACUUM 이전 — ANALYZE만 한 상태] ---
+
+EXPLAIN ANALYZE
+SELECT movie_id, rating FROM user_rating WHERE movie_id = 60300;
+
+ Bitmap Heap Scan on user_rating  (cost=189.44..31089.27 rows=10969 width=10) (actual time=2.353..604.980 rows=10339 loops=1)
+   Recheck Cond: (movie_id = 60300)
+   Heap Blocks: exact=9315
+   ->  Bitmap Index Scan on idx_user_rating__movie_rating  (cost=0.00..186.70 rows=10969 width=0) (actual time=1.521..1.522 rows=10339 loops=1)
+         Index Cond: (movie_id = 60300)
+ Planning Time: 0.236 ms
+ Execution Time: 605.861 ms
+
+EXPLAIN ANALYZE
+SELECT movie_id, rating, updated_at FROM user_rating WHERE movie_id = 60300;
+
+ Bitmap Heap Scan on user_rating  (cost=189.44..31089.27 rows=10969 width=18) (actual time=1.853..9.175 rows=10339 loops=1)
+   Recheck Cond: (movie_id = 60300)
+   Heap Blocks: exact=9315
+   ->  Bitmap Index Scan on idx_user_rating__movie_rating  (cost=0.00..186.70 rows=10969 width=0) (actual time=1.024..1.025 rows=10339 loops=1)
+         Index Cond: (movie_id = 60300)
+ Planning Time: 0.444 ms
+ Execution Time: 9.537 ms
+
+관찰: VACUUM 없이는 커버링 쿼리(movie_id, rating만 SELECT)도 Index Only Scan이
+안 뜨고 Bitmap Heap Scan으로만 나옴. 두 쿼리가 사실상 같은 계획 — B-3이
+의도한 대비가 전혀 안 보임.
+
+--- 첫 VACUUM 시도 실패 ---
+$ VACUUM user_rating;
+ERROR:  could not resize shared memory segment "/PostgreSQL.2259025264" to 67145248 bytes: No space left on device
+
+원인: docker-compose.yml의 postgres 서비스가 mem 1g로 떠 있었고 shm_size 기본값(64MB)이라
+충돌. vault/sessions/001-plan.md 공통 조건(mem 2g)과 불일치했던 것을 여기서 발견.
+docker-compose.yml에 shm_size: "256mb" 추가 + memory: 1g -> 2g로 수정 후 컨테이너 재생성
+(named volume이라 데이터 보존됨, count(*) 5030000 재확인함).
+
+--- VACUUM 성공 후 재확인 ---
+$ VACUUM user_rating;
+VACUUM
+
+EXPLAIN ANALYZE
+SELECT movie_id, rating FROM user_rating WHERE movie_id = 60300;
+
+ Index Only Scan using idx_user_rating__movie_rating on user_rating  (cost=0.43..315.22 rows=11588 width=10) (actual time=0.031..0.503 rows=10339 loops=1)
+   Index Cond: (movie_id = 60300)
+   Heap Fetches: 0
+ Planning Time: 0.749 ms
+ Execution Time: 0.735 ms
+
+EXPLAIN ANALYZE
+SELECT movie_id, rating, updated_at FROM user_rating WHERE movie_id = 60300;
+
+ Bitmap Heap Scan on user_rating  (cost=202.24..32450.20 rows=11588 width=18) (actual time=11.878..1312.969 rows=10339 loops=1)
+   Recheck Cond: (movie_id = 60300)
+   Heap Blocks: exact=9315
+   ->  Bitmap Index Scan on idx_user_rating__movie_rating  (cost=0.00..186.70 rows=10969 width=0) (actual time=1.365..1.365 rows=10339 loops=1)
+         Index Cond: (movie_id = 60300)
+ Planning Time: 0.299 ms
+ Execution Time: 1314.310 ms
+
+관찰: VACUUM 후에는 Index Only Scan(Heap Fetches: 0, 0.735ms) vs
+Bitmap Heap Scan(1314.310ms) — 명확한 대비. 약 1,788배 차이.
+
+================================================================
+B-4. 단일 vs 복합 인덱스 (컬럼 순서)
+================================================================
+
+--- 기준: idx_user_rating__user_updated(user_id, updated_at DESC) 있는 상태 ---
+
+EXPLAIN ANALYZE
+SELECT * FROM user_rating
+WHERE user_id = 36 AND updated_at >= '2026-01-01'
+ORDER BY updated_at DESC LIMIT 100;
+
+ Limit  (cost=0.43..177.72 rows=100 width=39) (actual time=0.716..2.298 rows=100 loops=1)
+   ->  Index Scan using idx_user_rating__user_updated on user_rating  (cost=0.43..7123.92 rows=4018 width=39) (actual time=0.715..2.289 rows=100 loops=1)
+         Index Cond: ((user_id = 36) AND (updated_at >= '2026-01-01 00:00:00+00'::timestamp with time zone))
+ Planning Time: 0.592 ms
+ Execution Time: 2.348 ms
+
+--- 인덱스 삭제 후 같은 쿼리 ---
+$ DROP INDEX idx_user_rating__user_updated; ANALYZE user_rating;
+
+ Limit  (cost=121446.61..121458.28 rows=100 width=39) (actual time=311.499..315.679 rows=100 loops=1)
+   ->  Gather Merge  (cost=121446.61..121885.31 rows=3760 width=39) (actual time=303.837..308.009 rows=100 loops=1)
+         Workers Planned: 2
+         Workers Launched: 2
+         ->  Sort  (cost=120446.59..120451.29 rows=1880 width=39) (actual time=293.685..293.689 rows=67 loops=3)
+               Sort Key: updated_at DESC
+               Sort Method: quicksort  Memory: 25kB
+               Worker 0:  Sort Method: top-N heapsort  Memory: 36kB
+               Worker 1:  Sort Method: top-N heapsort  Memory: 37kB
+               ->  Parallel Seq Scan on user_rating  (cost=0.00..120374.74 rows=1880 width=39) (actual time=182.574..293.466 rows=1296 loops=3)
+                     Filter: ((updated_at >= '2026-01-01 00:00:00+00'::timestamp with time zone) AND (user_id = 36))
+                     Rows Removed by Filter: 1675371
+ Planning Time: 0.265 ms
+ JIT:
+   Functions: 7
+   Options: Inlining false, Optimization false, Expressions true, Deforming true
+   Timing: Generation 0.510 ms, Inlining 0.000 ms, Optimization 0.587 ms, Emission 11.686 ms, Total 12.783 ms
+ Execution Time: 405.435 ms
+
+--- 순서를 뒤집은 인덱스: idx_test_reversed(updated_at DESC, user_id) ---
+$ CREATE INDEX idx_test_reversed ON user_rating(updated_at DESC, user_id); ANALYZE user_rating;
+
+ Limit  (cost=0.43..4399.33 rows=100 width=39) (actual time=0.061..2.656 rows=100 loops=1)
+   ->  Index Scan using idx_test_reversed on user_rating  (cost=0.43..108169.30 rows=2459 width=39) (actual time=0.060..2.647 rows=100 loops=1)
+         Index Cond: ((updated_at >= '2026-01-01 00:00:00+00'::timestamp with time zone) AND (user_id = 36))
+ Planning Time: 0.324 ms
+ Execution Time: 2.686 ms
+
+관찰: 기준 2.348ms / 인덱스 없음 405.435ms / 순서 뒤집음 2.686ms.
+순서를 뒤집어도 기준과 거의 차이가 없음 — ORDER BY updated_at DESC LIMIT 100이
+인덱스의 정렬 순서와 이미 일치해서 LIMIT이 스캔을 일찍 끊어주는 것으로 보임(가설,
+검증 안 됨). "ORDER BY 없는 네 번째 조건"은 001-plan.md에만 추가했고
+이 파일럿에서는 아직 실행하지 않았다.
+
+--- 정리 ---
+$ 99_cleanup.sql 실행 (idx_rating_movie_str, movie_id_str, idx_test_reversed 제거)
+$ 04_indexes.sql 재실행 (idx_user_rating__movie_rating, idx_user_rating__user_updated 복구)
+최종 인덱스: genres_pkey, idx_user_rating__movie_rating, idx_user_rating__user_updated,
+            movie_genres_pkey, movies_pkey
