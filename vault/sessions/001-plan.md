@@ -85,32 +85,47 @@ WHERE m.movie_id = 60300;
 Seq Scan 전환점이 안 보인다. 그래서 **"두 값 비교"가 아니라
 "조회 대상 비율을 올려가며 전환점을 찾는" 실험으로 바꾼다.**
 
-**보여줄 것:** 조회 대상 비율이 커질수록 Index Scan → Seq Scan으로 바뀐다
+**2026-08-28 파일럿에서 검증 완료.** 실행계획은 2단계가 아니라 **3단계**로 바뀐다 —
+Index Scan → Bitmap Heap Scan → Seq Scan. 아래 쿼리와 실측 비율로 재확정했다
+(원안의 "약 30%"는 user_id 1~1000을 300건/명 균등으로 잘못 계산한 값이었다.
+1~100이 헤비(5,000건/명)라 실제로는 15.31%밖에 안 된다).
 
 ```sql
--- 약 0.1%  (user_id 1명)
-EXPLAIN ANALYZE
-SELECT movie_id, rating FROM user_rating WHERE user_id = 1;
-
--- 약 1%    (user_id 10명)
-EXPLAIN ANALYZE
-SELECT movie_id, rating FROM user_rating WHERE user_id BETWEEN 1 AND 10;
-
--- 약 10%   (user_id 100명)
-EXPLAIN ANALYZE
-SELECT movie_id, rating FROM user_rating WHERE user_id BETWEEN 1 AND 100;
-
--- 약 30%   (user_id 1,000명)
-EXPLAIN ANALYZE
-SELECT movie_id, rating FROM user_rating WHERE user_id BETWEEN 1 AND 1000;
+EXPLAIN ANALYZE SELECT * FROM user_rating WHERE user_id = 36;                    -- 0.10%
+EXPLAIN ANALYZE SELECT * FROM user_rating WHERE user_id BETWEEN 1 AND 10;        -- 0.99%
+EXPLAIN ANALYZE SELECT * FROM user_rating WHERE user_id BETWEEN 1 AND 100;       -- 9.94%
+EXPLAIN ANALYZE SELECT * FROM user_rating WHERE user_id BETWEEN 1 AND 1100;      -- 15.90% (전환 직전)
+EXPLAIN ANALYZE SELECT * FROM user_rating WHERE user_id BETWEEN 1 AND 1150;      -- 16.20% (전환 직후)
+EXPLAIN ANALYZE SELECT * FROM user_rating WHERE user_id BETWEEN 1 AND 2000;      -- 21.27%
 ```
 
-user_id 1~100은 전부 헤비 유저(각 5,000건)라 위 비율은 대략적인 값이다.
-실제 비율은 각 단계에서 `count(*)`로 확인하고 노트에 적는다.
+`SELECT movie_id, rating`이 아니라 `SELECT *`로 검증했다 — 이 쿼리는 어차피
+`user_id`로 필터링하므로 `(movie_id, rating)` 인덱스의 커버링 효과와 무관해서
+컬럼을 좁혀도 결과가 달라지지 않는다.
+
+**실측 결과 (user_rating 5,030,000건 기준):**
+
+| 비율 | 쿼리 | 스캔 방식 | 실제 rows | 추정 rows | Execution Time |
+|---|---|---|---|---|---|
+| 0.10% | `= 36` | Index Scan | 5,000 | 4,844 | 16.7ms |
+| 0.99% | `BETWEEN 1 AND 10` | Index Scan | 50,000 | 54,622 | 29.1ms |
+| 9.94% | `BETWEEN 1 AND 100` | Bitmap Heap Scan | 500,000 | 534,798 | 431.5ms |
+| 15.90% | `BETWEEN 1 AND 1100` | Bitmap Heap Scan | 800,000 | 823,351 | — |
+| **16.20%** | `BETWEEN 1 AND 1150` | **Seq Scan** | 815,000 | 837,033 | 240.5ms |
+| 21.27% | `BETWEEN 1 AND 2000` | Seq Scan | 1,070,000 | 1,090,199 | 617.3ms |
+
+**전환점: 전체의 약 16%.** (`vault/raw/2026-08-28_pilot_b2_ratio_rehearsal.txt`에 전문 있음.
+1150 이후 5,000/10,000/20,000/50,000까지도 전부 Seq Scan을 재확인함)
 
 **볼 것:**
-- 어느 비율에서 `Index Scan`이 `Seq Scan`(또는 `Bitmap Heap Scan`)으로 바뀌는가
-- 옵티마이저의 `rows` 추정치와 실제 `rows` 값의 차이가 비율이 커질수록 어떻게 변하는가
+- Index Scan → Bitmap Heap Scan → Seq Scan, 3단계 전환이 실제로 보이는가
+- 16% 부근에서 조회 대상을 살짝만 늘려도(1100 → 1150) 계획이 바뀌는 것 —
+  "조금씩 나빠지는 게 아니라 어느 순간 뚝 떨어진다"는 걸 보여주는 지점
+- 옵티마이저 `rows` 추정치와 실제 `rows` 값의 차이가 비율이 커질수록 어떻게 변하는가
+  (추정 오차가 5~7% 수준으로 비교적 정확함 — `ANALYZE`를 직전에 실행해서다)
+
+**#미실험:** Index Scan → Bitmap Heap Scan 전환점(1%~10% 사이)은 이번엔 안 좁혔다.
+필요하면 당일 전에 추가로 찾아본다.
 
 ## B-3. 커버링 인덱스
 

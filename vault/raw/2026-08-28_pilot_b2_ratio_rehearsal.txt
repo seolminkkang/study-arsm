@@ -1,0 +1,127 @@
+B-2 재설계 검증 — 2026-08-28, 리허설(한 대), lab-postgres 컨테이너
+조건: PostgreSQL 16, user_rating 5,030,000건 (전체 대비 비율은 이 값 기준)
+     인덱스: idx_user_rating__movie_rating(movie_id, rating), idx_user_rating__user_updated(user_id, updated_at DESC)
+     쿼리는 001-plan.md 초안과 다르게 SELECT movie_id, rating이 아니라 SELECT * 로 실행함(요청대로)
+     git 커밋: efcc5dc 이후, 이 파일 작성 시점 아직 커밋 전.
+
+================================================================
+1차: 001-plan.md 원안 4개 (0.1% / 1% / 10% / 30% 가정)
+================================================================
+
+EXPLAIN ANALYZE SELECT * FROM user_rating WHERE user_id = 36;
+
+ Index Scan using idx_user_rating__user_updated on user_rating  (cost=0.43..8464.27 rows=4844 width=34) (actual time=11.056..16.541 rows=5000 loops=1)
+   Index Cond: (user_id = 36)
+ Planning Time: 0.368 ms
+ Execution Time: 16.702 ms
+
+EXPLAIN ANALYZE SELECT * FROM user_rating WHERE user_id BETWEEN 1 AND 10;
+
+ Index Scan using idx_user_rating__user_updated on user_rating  (cost=0.43..75614.93 rows=54622 width=34) (actual time=10.258..27.978 rows=50000 loops=1)
+   Index Cond: ((user_id >= 1) AND (user_id <= 10))
+ Planning Time: 0.379 ms
+ Execution Time: 29.077 ms
+
+EXPLAIN ANALYZE SELECT * FROM user_rating WHERE user_id BETWEEN 1 AND 100;
+
+ Bitmap Heap Scan on user_rating  (cost=13714.11..153065.26 rows=534798 width=34) (actual time=38.013..404.669 rows=500000 loops=1)
+   Recheck Cond: ((user_id >= 1) AND (user_id <= 100))
+   Heap Blocks: exact=4674
+   ->  Bitmap Index Scan on idx_user_rating__user_updated  (cost=0.00..13580.41 rows=534798 width=0) (actual time=33.355..33.356 rows=500000 loops=1)
+         Index Cond: ((user_id >= 1) AND (user_id <= 100))
+ Planning Time: 0.245 ms
+ Execution Time: 431.468 ms
+
+EXPLAIN ANALYZE SELECT * FROM user_rating WHERE user_id BETWEEN 1 AND 1000;
+
+ Bitmap Heap Scan on user_rating  (cost=20412.72..161208.30 rows=796126 width=34) (actual time=32.208..313.396 rows=770000 loops=1)
+   Recheck Cond: ((user_id >= 1) AND (user_id <= 1000))
+   Heap Blocks: exact=7197
+   ->  Bitmap Index Scan on idx_user_rating__user_updated  (cost=0.00..20213.69 rows=796126 width=0) (actual time=29.342..29.343 rows=770000 loops=1)
+         Index Cond: ((user_id >= 1) AND (user_id <= 1000))
+ Planning Time: 0.292 ms
+ Execution Time: 343.496 ms
+
+관찰: BETWEEN 1 AND 1000의 실제 비율은 15.31%다(770,000/5,030,000). 001-plan.md가
+"약 30%"라고 적어둔 건 user_id 1~1000을 300건/명 균등으로 가정한 계산이라 틀렸다 —
+실제로는 1~100이 헤비(5,000건/명)라 비중이 훨씬 크다. 4번째 조건까지도 Seq Scan
+전환은 안 일어남(Bitmap Heap Scan 유지) → 001-plan.md 지침대로 비율을 더 올려서 계속 탐색.
+
+================================================================
+2차: 전환점 탐색 (N = user_id 상한을 올려가며)
+================================================================
+
+N=2000, 1,070,000행(21.27%)
+ Seq Scan on user_rating  (cost=0.00..164092.24 rows=1090199 width=34) (actual time=203.297..582.703 rows=1070000 loops=1)
+   Filter: ((user_id >= 1) AND (user_id <= 2000))
+   Rows Removed by Filter: 3960000
+ Execution Time: 617.295 ms
+
+N=5000, 1,970,000행(39.17%)
+ Seq Scan on user_rating  (cost=0.00..164092.24 rows=1979980 width=34) (actual time=50.394..284.203 rows=1970000 loops=1)
+   Filter: ((user_id >= 1) AND (user_id <= 5000))
+   Rows Removed by Filter: 3060000
+ Execution Time: 333.510 ms
+
+N=10000, 3,470,000행(68.99%)
+ Seq Scan on user_rating  (cost=0.00..164092.24 rows=3479584 width=34) (actual time=54.293..341.475 rows=3470000 loops=1)
+   Filter: ((user_id >= 1) AND (user_id <= 10000))
+   Rows Removed by Filter: 1560000
+ Execution Time: 423.552 ms
+
+N=20000, 3,668,300행(72.93%)
+ Seq Scan on user_rating  (cost=0.00..164092.24 rows=3684649 width=34) (actual time=51.879..328.705 rows=3668300 loops=1)
+   Filter: ((user_id >= 1) AND (user_id <= 20000))
+   Rows Removed by Filter: 1361700
+ Execution Time: 413.133 ms
+
+N=50000, 4,178,300행(83.07%)
+ Seq Scan on user_rating  (cost=0.00..164092.24 rows=4203489 width=34) (actual time=51.516..355.270 rows=4178300 loops=1)
+   Filter: ((user_id >= 1) AND (user_id <= 50000))
+   Rows Removed by Filter: 851700
+ Execution Time: 449.476 ms
+
+관찰: N=2000(21.27%)에서 이미 Seq Scan. N=1000(15.31%)은 Bitmap Heap Scan이었으므로
+전환점은 15.31%~21.27% 사이. 이분 탐색으로 좁힘.
+
+================================================================
+3차: 전환점 좁히기
+================================================================
+
+N=1200, 830,000행(16.50%) -> Seq Scan
+ Seq Scan on user_rating  (cost=0.00..164092.24 rows=850812 width=34) (actual time=52.348..244.169 rows=830000 loops=1)
+   Filter: ((user_id >= 1) AND (user_id <= 1200))
+   Rows Removed by Filter: 4200000
+
+N=1400, 890,000행(17.69%) -> Seq Scan
+N=1600, 950,000행(18.89%) -> Seq Scan
+N=1800, 1,010,000행(20.08%) -> Seq Scan
+(위 세 개는 N=1200과 동일 패턴, EXPLAIN 첫 줄만 Seq Scan/Filter로 확인)
+
+N=1050, 785,000행(15.61%) -> Bitmap Heap Scan
+ Bitmap Heap Scan on user_rating  (cost=20764.25..161635.06 rows=809738 width=34) (actual time=26.834..92.848 rows=785000 loops=1)
+   Recheck Cond: ((user_id >= 1) AND (user_id <= 1050))
+   Heap Blocks: exact=7338
+   ->  Bitmap Index Scan on idx_user_rating__user_updated (actual time=22.605..22.606 rows=785000 loops=1)
+
+N=1100, 800,000행(15.90%) -> Bitmap Heap Scan
+ Bitmap Heap Scan on user_rating  (cost=21111.78..162057.84 rows=823351 width=34) (actual time=27.265..75.175 rows=800000 loops=1)
+   Recheck Cond: ((user_id >= 1) AND (user_id <= 1100))
+   Heap Blocks: exact=7478
+   ->  Bitmap Index Scan on idx_user_rating__user_updated (actual time=24.093..24.095 rows=800000 loops=1)
+
+N=1150, 815,000행(16.20%) -> Seq Scan
+ Seq Scan on user_rating  (cost=0.00..164092.24 rows=837033 width=34) (actual time=53.390..240.519 rows=815000 loops=1)
+   Filter: ((user_id >= 1) AND (user_id <= 1150))
+   Rows Removed by Filter: 4215000
+ Planning Time: 0.232 ms
+
+================================================================
+결론 (raw 파일에는 사실만 — 해석은 experiments/에서)
+================================================================
+
+- N=1100 (15.90%): Bitmap Heap Scan (마지막으로 확인된 인덱스 사용 지점)
+- N=1150 (16.20%): Seq Scan (처음 확인된 시퀀셜 스캔 지점)
+- 전환점은 전체의 약 15.9%~16.2% 사이.
+- Index Scan -> Bitmap Heap Scan 전환은 1%(N=10)와 10%(N=100) 사이 어딘가지만
+  이번 탐색에서는 좁히지 않았다(#미실험 — 필요하면 추가 탐색).
