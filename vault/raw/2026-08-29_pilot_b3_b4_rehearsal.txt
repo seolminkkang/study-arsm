@@ -1,0 +1,221 @@
+B-3 / B-4 검증 — 2026-08-29, 리허설(한 대), lab-postgres 컨테이너
+조건: PostgreSQL 16, CPU 2, mem 2g, shm_size 256mb
+     user_rating 5,030,000 / movies 19,701 / genres 19 / movie_genres 47,104
+     시작 시점 인덱스: idx_user_rating__movie_rating(movie_id, rating),
+                       idx_user_rating__user_updated(user_id, updated_at DESC)
+     테스트 ID: 헤비 36, 인기영화 60300
+     직전 커밋: e218644
+
+================================================================
+B-3. 커버링 인덱스 — 재현 확인
+================================================================
+
+VACUUM은 2026-08-28에 이미 실행됨(last_vacuum 08-28 09:59:02).
+이번엔 VACUUM 없이 바로 실행 — visibility map이 유지되는지 함께 확인.
+
+--- [1차 실행 — 통계가 오래된 상태] ---
+
+EXPLAIN ANALYZE
+SELECT movie_id, rating FROM user_rating WHERE movie_id = 60300;
+
+ Index Only Scan using idx_user_rating__movie_rating on user_rating  (cost=0.43..8.84 rows=252 width=10) (actual time=0.127..0.554 rows=10339 loops=1)
+   Index Cond: (movie_id = 60300)
+   Heap Fetches: 0
+ Planning Time: 0.225 ms
+ Execution Time: 0.779 ms
+
+EXPLAIN ANALYZE
+SELECT movie_id, rating, updated_at FROM user_rating WHERE movie_id = 60300;
+
+ Bitmap Heap Scan on user_rating  (cost=6.39..977.29 rows=252 width=18) (actual time=1.883..99.106 rows=10339 loops=1)
+   Recheck Cond: (movie_id = 60300)
+   Heap Blocks: exact=9315
+   ->  Bitmap Index Scan on idx_user_rating__movie_rating  (cost=0.00..6.32 rows=252 width=0) (actual time=0.997..0.998 rows=10339 loops=1)
+         Index Cond: (movie_id = 60300)
+ Planning Time: 0.216 ms
+ Execution Time: 99.831 ms
+
+관찰:
+- Index Only Scan(Heap Fetches: 0, 0.779ms) vs Bitmap Heap Scan(99.831ms). 약 128배.
+  VACUUM은 전날 실행분이 그대로 유효했다(Heap Fetches: 0 유지).
+- 08-28 측정치(0.735ms vs 1314.310ms, 약 1788배)와 배율이 크게 다르다.
+  비커버링 쪽만 1314ms -> 99ms로 빨라졌다. 같은 테이블을 반복 조회해서
+  OS 페이지 캐시가 더워진 상태로 보인다(가설). 배율의 절대값은 캐시 상태에
+  좌우되므로 인용하지 않는 편이 안전하다. 방향(커버링이 빠르다)만 안정적이다.
+- rows 추정치 252 vs 실제 10,339 — 41배 과소추정. 아래에서 원인 확인.
+
+--- [통계 상태 점검] ---
+
+SELECT last_analyze, last_autoanalyze, last_vacuum, last_autovacuum, n_live_tup, n_mod_since_analyze
+FROM pg_stat_user_tables WHERE relname='user_rating';
+
+         last_analyze          |       last_autoanalyze        |          last_vacuum          |       last_autovacuum        | n_live_tup | n_mod_since_analyze
+-------------------------------+-------------------------------+-------------------------------+------------------------------+------------+---------------------
+ 2026-08-28 09:38:53.670273+00 | 2026-08-28 09:36:44.840758+00 | 2026-08-28 09:59:02.283037+00 | 2026-08-28 09:36:43.80739+00 |    5011016 |                   0
+
+SELECT attname, n_distinct, array_length(most_common_vals::text::text[],1) AS mcv_count
+FROM pg_stats WHERE tablename='user_rating' AND attname IN ('movie_id','user_id');
+
+ attname  | n_distinct | mcv_count
+----------+------------+-----------
+ user_id  |      20150 |       100
+ movie_id |      15601 |       100
+
+--- [ANALYZE 후 재실행] ---
+
+$ ANALYZE user_rating;
+ANALYZE
+
+ last_analyze: 2026-08-29 08:34:56.969749+00
+
+SELECT 60300 = ANY(most_common_vals::text::bigint[]) AS is_in_mcv, n_distinct
+FROM pg_stats WHERE tablename='user_rating' AND attname='movie_id';
+
+ is_in_mcv | n_distinct
+-----------+------------
+ t         |      15701
+
+EXPLAIN ANALYZE SELECT movie_id, rating FROM user_rating WHERE movie_id = 60300;
+
+ Index Only Scan using idx_user_rating__movie_rating on user_rating  (cost=0.43..331.05 rows=12264 width=10) (actual time=0.031..0.470 rows=10339 loops=1)
+   Index Cond: (movie_id = 60300)
+   Heap Fetches: 0
+ Planning Time: 0.218 ms
+ Execution Time: 0.698 ms
+
+관찰: 추정치 252 -> 12,264 (실제 10,339 대비 +19%)로 정상화.
+ANALYZE 후에는 movie_id=60300이 MCV(most common values, 자주 나오는 값 100개
+목록)에 들어 있다. MCV에 있으면 옵티마이저가 그 값의 실제 빈도를 알고,
+없으면 5,030,000 / n_distinct 15,601 = 약 322 로 일반 추정한다(관측된 252와 근사).
+스캔 방식 자체는 두 경우 다 Index Only Scan으로 같았다 — 이번엔 추정 오차가
+계획을 바꾸지는 않았다.
+
+================================================================
+B-4. 단일 vs 복합 인덱스 (컬럼 순서) — 4번째 조건 포함 전체 검증
+================================================================
+
+001-plan.md의 "ORDER BY 없는 네 번째 조건"을 확인하기 위해,
+인덱스 3가지 상태 x 쿼리 2종 = 6개를 전부 측정했다.
+
+Q_ordered : WHERE user_id = 36 AND updated_at >= '2026-01-01' ORDER BY updated_at DESC LIMIT 100
+Q_plain   : WHERE user_id = 36 AND updated_at >= '2026-01-01'   (ORDER BY / LIMIT 없음)
+
+---------------- 상태 A: idx_user_rating__user_updated(user_id, updated_at DESC) ----------------
+
+[A-1] Q_ordered
+
+ Limit  (cost=0.43..176.23 rows=100 width=34) (actual time=0.078..1.392 rows=100 loops=1)
+   ->  Index Scan using idx_user_rating__user_updated on user_rating  (cost=0.43..7056.84 rows=4014 width=34) (actual time=0.077..1.385 rows=100 loops=1)
+         Index Cond: ((user_id = 36) AND (updated_at >= '2026-01-01 00:00:00+00'::timestamp with time zone))
+ Planning Time: 0.272 ms
+ Execution Time: 1.418 ms
+
+[A-2] Q_plain
+
+ Index Scan using idx_user_rating__user_updated on user_rating  (cost=0.43..7056.84 rows=4014 width=34) (actual time=0.027..0.827 rows=3887 loops=1)
+   Index Cond: ((user_id = 36) AND (updated_at >= '2026-01-01 00:00:00+00'::timestamp with time zone))
+ Planning Time: 0.227 ms
+ Execution Time: 0.927 ms
+
+---------------- 상태 B: 인덱스 없음 ----------------
+$ DROP INDEX idx_user_rating__user_updated; ANALYZE user_rating;
+
+[B-1] Q_ordered
+
+ Limit  (cost=121534.82..121546.48 rows=100 width=34) (actual time=159.990..163.122 rows=100 loops=1)
+   ->  Gather Merge  (cost=121534.82..121761.63 rows=1944 width=34) (actual time=156.680..159.807 rows=100 loops=1)
+         Workers Planned: 2
+         Workers Launched: 2
+         ->  Sort  (cost=120534.79..120537.22 rows=972 width=34) (actual time=147.003..147.007 rows=67 loops=3)
+               Sort Key: updated_at DESC
+               Sort Method: quicksort  Memory: 25kB
+               Worker 0:  Sort Method: top-N heapsort  Memory: 36kB
+               Worker 1:  Sort Method: top-N heapsort  Memory: 37kB
+               ->  Parallel Seq Scan on user_rating  (cost=0.00..120497.64 rows=972 width=34) (actual time=71.348..146.819 rows=1296 loops=3)
+                     Filter: ((updated_at >= '2026-01-01 00:00:00+00'::timestamp with time zone) AND (user_id = 36))
+                     Rows Removed by Filter: 1675371
+ Planning Time: 0.238 ms
+ JIT:
+   Functions: 13
+   Options: Inlining false, Optimization false, Expressions true, Deforming true
+   Timing: Generation 0.698 ms, Inlining 0.000 ms, Optimization 0.687 ms, Emission 7.755 ms, Total 9.140 ms
+ Execution Time: 180.516 ms
+
+[B-2] Q_plain
+
+ Gather  (cost=1000.00..121730.84 rows=2332 width=34) (actual time=38.021..132.931 rows=3887 loops=1)
+   Workers Planned: 2
+   Workers Launched: 2
+   ->  Parallel Seq Scan on user_rating  (cost=0.00..120497.64 rows=972 width=34) (actual time=57.740..118.634 rows=1296 loops=3)
+         Filter: ((updated_at >= '2026-01-01 00:00:00+00'::timestamp with time zone) AND (user_id = 36))
+         Rows Removed by Filter: 1675371
+ Planning Time: 0.201 ms
+ JIT:
+   Functions: 12
+   Options: Inlining false, Optimization false, Expressions true, Deforming true
+   Timing: Generation 0.711 ms, Inlining 0.000 ms, Optimization 0.665 ms, Emission 7.301 ms, Total 8.677 ms
+ Execution Time: 144.375 ms
+
+---------------- 상태 C: idx_test_reversed(updated_at DESC, user_id) ----------------
+$ CREATE INDEX idx_test_reversed ON user_rating(updated_at DESC, user_id); ANALYZE user_rating;
+
+[C-1] Q_ordered
+
+ Limit  (cost=0.43..4017.53 rows=100 width=34) (actual time=0.044..2.244 rows=100 loops=1)
+   ->  Index Scan using idx_test_reversed on user_rating  (cost=0.43..108542.27 rows=2702 width=34) (actual time=0.043..2.236 rows=100 loops=1)
+         Index Cond: ((updated_at >= '2026-01-01 00:00:00+00'::timestamp with time zone) AND (user_id = 36))
+ Planning Time: 0.336 ms
+ Execution Time: 2.277 ms
+
+[C-2] Q_plain
+
+ Bitmap Heap Scan on user_rating  (cost=97868.06..107174.88 rows=2702 width=34) (actual time=83.663..83.915 rows=3887 loops=1)
+   Recheck Cond: ((updated_at >= '2026-01-01 00:00:00+00'::timestamp with time zone) AND (user_id = 36))
+   Heap Blocks: exact=47
+   ->  Bitmap Index Scan on idx_test_reversed  (cost=0.00..97867.38 rows=2702 width=0) (actual time=81.299..81.300 rows=3887 loops=1)
+         Index Cond: ((updated_at >= '2026-01-01 00:00:00+00'::timestamp with time zone) AND (user_id = 36))
+ Planning Time: 0.255 ms
+ JIT:
+   Functions: 4
+   Options: Inlining false, Optimization false, Expressions true, Deforming true
+   Timing: Generation 0.143 ms, Inlining 0.000 ms, Optimization 0.225 ms, Emission 2.101 ms, Total 2.469 ms
+ Execution Time: 93.838 ms
+
+---------------- 요약표 ----------------
+
+                          Q_ordered              Q_plain
+                          (ORDER BY + LIMIT 100)  (ORDER BY 없음)
+A 기준 인덱스              1.418 ms                0.927 ms
+B 인덱스 없음            180.516 ms              144.375 ms
+C 순서 뒤집음              2.277 ms               93.838 ms
+
+A 대비 C의 배율           1.6배                  101배
+
+---------------- 해석 근거로 확인한 값 ----------------
+
+SELECT count(*), round(100.0*count(*)/5030000,1) FROM user_rating WHERE updated_at >= '2026-01-01';
+ 3876969 | 77.1
+
+SELECT count(*) FROM user_rating WHERE updated_at >= '2026-01-01' AND user_id = 36;
+ 3887
+
+관찰:
+- Q_ordered에서는 뒤집은 인덱스(C)가 기준(A)과 거의 같다(1.418ms vs 2.277ms, 1.6배).
+  08-28 파일럿에서 관찰한 것과 동일하게 재현됨.
+- Q_plain에서는 뒤집은 인덱스(C)가 기준(A)보다 101배 느리다(0.927ms vs 93.838ms).
+  08-28에 "가설"로 적어둔 것이 여기서 갈렸다.
+- 숫자상 설명: 뒤집은 인덱스의 선두 컬럼 updated_at에 걸린 범위 조건이
+  3,876,969행(전체의 77.1%)을 통과시킨다. 그중 user_id=36은 3,887행(0.1%)뿐이라
+  나머지를 인덱스에서 전부 훑어야 한다 — Bitmap Index Scan 단독으로 81.3ms 소요.
+  ORDER BY updated_at DESC LIMIT 100이 붙으면 인덱스를 정렬 순서대로 걸어가다가
+  100건을 채우는 즉시 멈출 수 있어서(조기 종료) 이 비용이 발생하지 않는다.
+- C-2의 Heap Blocks: exact=47 — 실제 힙 접근은 적다. 비용은 힙이 아니라
+  인덱스를 훑는 데서 나온다.
+- B(인덱스 없음)는 Q_ordered 180.5ms / Q_plain 144.4ms. C의 Q_plain(93.8ms)이
+  인덱스 없는 경우보다는 여전히 빠르다 — "순서가 틀린 인덱스"가 "인덱스 없음"보다는 낫다.
+
+---------------- 정리 ----------------
+$ 99_cleanup.sql 실행 (idx_test_reversed 제거)
+$ 04_indexes.sql 실행 (idx_user_rating__user_updated 복구)
+최종 인덱스: genres_pkey, idx_user_rating__movie_rating, idx_user_rating__user_updated,
+            movie_genres_pkey, movies_pkey

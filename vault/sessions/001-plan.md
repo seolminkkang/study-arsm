@@ -153,46 +153,85 @@ SELECT movie_id, rating, updated_at FROM user_rating WHERE movie_id = <인기영
 
 **볼 것:** `Index Only Scan` vs `Index Scan`, `Heap Fetches` 수치
 
+**2026-08-29 재현 확인.** 커버링 0.779ms(`Heap Fetches: 0`) vs 비커버링 99.831ms.
+VACUUM은 전날 실행분이 그대로 유효했다 — 매번 다시 돌릴 필요는 없고,
+**시딩을 새로 했을 때만** 필수다.
+
+**단, 배율은 인용하지 않는다.** 08-28에는 1,788배(0.735ms vs 1314ms), 08-29에는
+128배(0.779ms vs 99.8ms)가 나왔다. 비커버링 쪽이 OS 페이지 캐시 상태에 따라
+1314ms → 99ms로 요동친다. 방향(커버링이 빠르다)만 안정적이므로 당일에도
+"몇 배"가 아니라 `Heap Fetches: 0`과 `Heap Blocks: exact=9315`의 대비로 설명한다.
+
+**옵티마이저 추정치도 같이 본다.** 08-29 첫 실행에서 추정 252 vs 실제 10,339으로
+41배 과소추정이 나왔다. `ANALYZE user_rating;` 후 12,264으로 정상화됐다.
+원인은 `movie_id=60300`이 MCV(most common values, 자주 나오는 값 100개 목록)에
+들어 있느냐다 — 목록에 있으면 실제 빈도를 알고, 없으면
+`전체행수 / n_distinct = 5,030,000 / 15,601 ≈ 322`로 일반 추정한다.
+이번엔 추정이 틀려도 스캔 방식은 안 바뀌었지만, B-2의 16% 경계 근처에서는
+이 오차가 계획을 바꿀 수 있다. **회차 시작 전에 `ANALYZE`를 한 번 돌리고 들어간다.**
+
 ## B-4. 단일 vs 복합 인덱스 (컬럼 순서)
 
-**보여줄 것:** 같은 두 칼럼이라도 순서에 따라 다르다
+**보여줄 것:** 같은 두 칼럼이라도 순서에 따라 다르다.
+그리고 **"얼마나 다른지는 쿼리 모양이 정한다."**
+
+**2026-08-29에 6개 조합을 전부 측정해서 확정했다.** 인덱스 3상태 × 쿼리 2종으로
+돌린다 — 쿼리를 한 종류만 돌리면 결론이 정반대로 나온다.
 
 ```sql
--- 기준: (user_id, updated_at DESC) 인덱스 있는 상태
-EXPLAIN ANALYZE
+-- 두 가지 쿼리 모양
+-- Q_ordered
 SELECT * FROM user_rating
 WHERE user_id = <헤비ID> AND updated_at >= '2026-01-01'
 ORDER BY updated_at DESC LIMIT 100;
 
--- 인덱스를 지우고 다시
-DROP INDEX idx_user_rating__user_updated;
-ANALYZE user_rating;
--- 같은 쿼리 재실행
-
--- 순서를 뒤집어서
-CREATE INDEX idx_test_reversed ON user_rating(updated_at DESC, user_id);
-ANALYZE user_rating;
--- 같은 쿼리 재실행
-
--- 네 번째 조건: ORDER BY / LIMIT을 뺀 같은 조건 (idx_test_reversed 있는 상태에서)
-EXPLAIN ANALYZE
+-- Q_plain  (ORDER BY / LIMIT 없음)
 SELECT * FROM user_rating
 WHERE user_id = <헤비ID> AND updated_at >= '2026-01-01';
 ```
 
-**볼 것:** 네 조건의 실행 시간과 스캔 행 수
+세 가지 인덱스 상태에서 위 두 쿼리를 각각 `EXPLAIN ANALYZE` 한다.
 
-**2026-08-28 파일럿에서 나온, 계획에 없던 발견:**
-`ORDER BY updated_at DESC LIMIT 100`이 있으면 컬럼 순서를 뒤집은 인덱스
-(`updated_at DESC, user_id`)도 기존 인덱스와 거의 차이가 안 났다(2.3ms vs 2.7ms).
-`updated_at DESC`가 이미 정렬 순서와 일치해서, LIMIT이 스캔을 일찍 끊어주기 때문으로
-보인다(가설). 책은 "컬럼 순서가 중요하다"까지만 말하지만, 실측하면
-**"ORDER BY와 인덱스 선두 컬럼이 일치하는지에 따라 달라진다"**가 나온다.
-네 번째 조건(ORDER BY 없이)에서 이 가설이 맞는지 확인한다 — LIMIT의 조기 종료
-효과가 없어지면 순서를 뒤집은 인덱스가 진짜로 나빠지는지가 이 회차의 예측 소재다.
-둘 다 "뒤집으면 무조건 나빠진다"고 예측할 가능성이 높은데, 조건에 따라 틀린다.
+```sql
+-- 상태 A: 기준 (user_id, updated_at DESC)  ← 04_indexes.sql 그대로
 
-실험이 끝나면 원래 인덱스를 복구한다.
+-- 상태 B: 인덱스 없음
+DROP INDEX idx_user_rating__user_updated;
+ANALYZE user_rating;
+
+-- 상태 C: 순서를 뒤집음
+CREATE INDEX idx_test_reversed ON user_rating(updated_at DESC, user_id);
+ANALYZE user_rating;
+```
+
+**실측 결과 (헤비ID=36, user_rating 5,030,000건)**
+
+| 인덱스 상태 | Q_ordered | Q_plain |
+|---|---|---|
+| A 기준 `(user_id, updated_at DESC)` | 1.418 ms | 0.927 ms |
+| B 인덱스 없음 | 180.516 ms | 144.375 ms |
+| C 순서 뒤집음 `(updated_at DESC, user_id)` | 2.277 ms | 93.838 ms |
+| **A 대비 C** | **1.6배** | **101배** |
+
+**이게 이 회차의 예측 소재다.** 둘 다 "순서를 뒤집으면 나빠진다"고 예측할
+가능성이 높은데, `ORDER BY ... LIMIT`이 붙어 있으면 **거의 차이가 없다**(1.6배).
+같은 인덱스, 같은 조건인데 `ORDER BY`와 `LIMIT`을 떼는 순간 101배로 벌어진다.
+
+**숫자로 설명되는 이유** (08-29 확인)
+- `updated_at >= '2026-01-01'` 조건에 걸리는 행이 3,876,969건 — **전체의 77.1%**다.
+- 그중 `user_id = 36`은 3,887건, 즉 그 77.1% 안에서 **0.1%**뿐이다.
+- 상태 C의 인덱스는 선두 컬럼이 `updated_at`이라, 저 77.1%를 인덱스에서
+  전부 훑고 나서 `user_id`로 걸러내야 한다 → `Bitmap Index Scan`만 81.3ms.
+- `ORDER BY updated_at DESC LIMIT 100`이 붙으면 인덱스를 정렬된 순서대로
+  걸어가다가 100건을 채우는 순간 멈출 수 있다(조기 종료). 그래서 77.1%를
+  훑는 비용이 아예 발생하지 않는다.
+- 참고: C의 `Q_plain`(93.8ms)도 인덱스가 아예 없는 B(144.4ms)보다는 빠르다.
+  "순서가 틀린 인덱스"가 "인덱스 없음"보다는 낫다.
+
+**볼 것:** 여섯 조합의 실행 시간, 스캔 방식, 그리고 C-2의 `Heap Blocks: exact=47` —
+힙 접근은 적은데 느리다. 비용이 테이블이 아니라 **인덱스를 훑는 데서** 나온다는 증거다.
+
+실험이 끝나면 `99_cleanup.sql` → `04_indexes.sql` 순으로 원래 인덱스를 복구한다.
 
 ---
 
@@ -343,7 +382,13 @@ k6와 앱이 CPU를 두고 싸우므로 절대값을 믿을 수 없다.
 - [ ] `shm_size`가 256mb 이상인가 (`docker-compose.yml`)
 - [ ] 쿼리에 쓰는 ID(헤비ID/라이트ID/인기영화ID)가 실제로 존재하는 값인가
       (`00_find_test_ids.sql`로 재확인 — 시딩할 때마다 바뀐다)
+- [ ] 회차 시작 직전에 `ANALYZE user_rating;`을 돌렸는가
+      (안 돌리면 추정치가 41배까지 틀어진다 — 2026-08-29 B-3에서 확인)
 - [ ] B급 4개 쿼리가 전부 실행되고, 실행계획에 차이가 보이는가
+      → **B-1~B-4 전부 2026-08-28~29 파일럿에서 검증 완료.**
+        `vault/raw/2026-08-28_pilot_b1~b4_rehearsal.txt`,
+        `vault/raw/2026-08-28_pilot_b2_ratio_rehearsal.txt`,
+        `vault/raw/2026-08-29_pilot_b3_b4_rehearsal.txt`
 - [ ] A-1 ①의 쿼리가 충분히 느린가 (offset 0 대비 **3배 이상**)
 - [ ] ②의 계산값과 ③의 실측값이 실제로 다른가 (같으면 실험이 무의미)
 - [ ] 풀 크기를 바꿨을 때 Grafana 3패널이 눈에 띄게 움직이는가
