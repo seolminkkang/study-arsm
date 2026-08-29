@@ -340,12 +340,64 @@ VU 기반이었으면 "느려지면 부하도 줄어들어" 이 현상이 아예
 
 ## ⑥ 커서 페이징으로 교체
 
+**원안은 2026-08-29 파일럿에서 실패했다.**
+
 ```
-before: GET /lab/ratings?userId=X&offset=4000&limit=10
-after:  GET /lab/ratings?userId=X&cursorId=<마지막ID>&limit=10
+before: GET /lab/ratings?userId=X&offset=4000&limit=10   <- 차이가 안 난다
 ```
 
-같은 부하 시나리오를 다시 돌린다. ③④의 숫자와 직접 비교한다.
+`(user_id, updated_at DESC)` 인덱스가 있어서 특정 유저 안에서는 오프셋을
+아무리 키워도 싸다. 실측으로 offset=0이 4.1ms, offset=4900이 4.9ms — 1.2배다.
+판정 기준(1.5배 미만은 실패)에 못 미친다.
+
+**전체 목록 기준으로 바꾼다.** userId를 빼면 인덱스를 못 타서 5백만 행을
+정렬해야 하고, 거기서 오프셋 비용이 드러난다.
+
+```
+before: GET /lab/ratings?offset=4900000&limit=10
+after:  GET /lab/ratings?cursorUpdatedAt=2024-10-01T00:00:00Z&limit=10
+```
+
+커서 값이 `cursorId`가 아니라 `cursorUpdatedAt`인 이유: `user_rating`에는
+대리키가 없다. 정렬 기준이 `updated_at`이므로 커서도 타임스탬프다.
+
+### 실측 (2026-08-29, 유휴 상태 단건)
+
+| 조건 | `updated_at` 인덱스 없음 | 있음 |
+|---|---|---|
+| before: `offset=4900000` | 1.16 s | **8.5 s** |
+| after: `cursorUpdatedAt` (깊음) | 0.11 s | **5.7 ms** |
+| 배수 | 10배 | **1,500배** |
+
+**인덱스를 걸면 오프셋이 오히려 7배 느려진다**(1.16초 → 8.5초).
+인덱스가 생기니 옵티마이저가 Index Scan으로 바꾸는데, 4,900,000건을
+인덱스로 훑으면서 매 건 힙을 찾아가느라 순차 스캔보다 나빠진다.
+이게 이 회차에서 제일 직관에 안 맞는 숫자다. **예측 소재로 쓴다** —
+"인덱스를 걸면 빨라진다"고 예측할 텐데 절반만 맞는다.
+
+인덱스는 베이스라인(`04_indexes.sql`)에 넣지 않았다. 실험 조건 그 자체다.
+
+```sql
+CREATE INDEX idx_user_rating__updated ON user_rating(updated_at DESC);
+ANALYZE user_rating;
+-- 끝나면 99_cleanup.sql이 지운다
+```
+
+### 또 하나 — 오프셋 깊이는 생각보다 안 중요하다
+
+| offset | 시간 |
+|---|---|
+| 50,000 | 0.82 s |
+| 200,000 | 0.74 s |
+| 500,000 | 0.75 s |
+| 1,000,000 | 0.79 s |
+| 4,900,000 | 1.16 s |
+
+5만이든 100만이든 거의 같다. **비용의 대부분은 건너뛰기가 아니라
+5백만 행 정렬**이다(`updated_at` 인덱스가 없어서). 깊이가 문제라고
+말하기 쉬운데 실측은 다르게 나온다.
+
+부하 시나리오는 `lab/k6/offset-vs-cursor.js`. ③④의 숫자와 직접 비교한다.
 
 **볼 것:** 포화점이 어디로 이동했는지. 병목이 사라졌는지 다른 곳으로 옮겼는지.
 

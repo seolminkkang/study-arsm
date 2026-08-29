@@ -49,10 +49,16 @@ public class LabController {
             @RequestParam(required = false) Long userId,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) OffsetDateTime from,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) OffsetDateTime to,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) OffsetDateTime cursorUpdatedAt,
             @RequestParam(defaultValue = "10") int limit,
             @RequestParam(defaultValue = "0") int offset) {
         if (userId != null && from != null && to != null) {
             return repo.ratingsByUserAndRange(userId, from, to);
+        }
+        if (cursorUpdatedAt != null) {
+            return userId != null
+                    ? repo.ratingsByUserCursor(userId, cursorUpdatedAt, limit)
+                    : repo.ratingsByCursor(cursorUpdatedAt, limit);
         }
         return userId != null
                 ? repo.ratingsByUserOffset(userId, limit, offset)

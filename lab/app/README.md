@@ -50,20 +50,26 @@ psql에서 `EXPLAIN`한 쿼리와 앱이 실행한 쿼리가 서로 다른 것�
 | `GET /lab/ratings?userId=&from=&to=` | 복합 인덱스, 선택도 |
 | `GET /lab/movies/{id}/stats` | count 집계 vs 미리 집계 |
 
-`/lab/ratings` 추가 형태 (A-1 ①용)
+`/lab/ratings` 추가 형태 (A-1 ①, A-2 ⑥용)
 ```
-GET /lab/ratings?userId=36&offset=4000&limit=10   특정 유저 안에서 오프셋
-GET /lab/ratings?offset=4900000&limit=10          전체 목록 기준 오프셋
+GET /lab/ratings?userId=36&offset=4000&limit=10          특정 유저 안에서 오프셋
+GET /lab/ratings?offset=4900000&limit=10                 전체 목록 기준 오프셋
+GET /lab/ratings?cursorUpdatedAt=2024-10-01T00:00:00Z&limit=10    커서 페이징
+GET /lab/ratings?userId=36&cursorUpdatedAt=...&limit=10  유저 안에서 커서
 ```
 
 `/lab/ratings?userId=&from=&to=` 에는 `LIMIT`을 걸지 않는다.
 헤비 유저와 라이트 유저의 반환 행 수 차이가 선택도 실험의 관측 대상이라
 `LIMIT`으로 덮으면 안 된다.
 
-**아직 없는 것:** A-2 ⑥의 `/lab/ratings?userId=&cursorId=` (커서 페이징).
-`user_rating`에는 대리키가 없어서 커서를 `updated_at` 기준으로 잡을지
-`movie_id` 기준으로 잡을지 정해야 하는데, 동점 처리 방식에 따라 결과가
-달라진다. A-2를 실제로 할 때 정하고 추가한다. #미실험
+**커서 파라미터 이름이 `cursorId`가 아니라 `cursorUpdatedAt`인 이유:**
+`user_rating`에는 대리키가 없다. 정렬 기준이 `updated_at`이므로 커서 값도
+타임스탬프다. `001-plan.md`가 `cursorId`라고 적었지만 이 테이블에는
+그런 칼럼이 없다.
+
+`updated_at`이 같은 행이 여럿이면 경계에서 몇 건 건너뛸 수 있다.
+시딩이 마이크로초까지 랜덤이라 실제로는 거의 안 생기고, 여기서 재려는 건
+정확한 페이징이 아니라 오프셋과의 비용 차이다.
 
 ## 실행
 

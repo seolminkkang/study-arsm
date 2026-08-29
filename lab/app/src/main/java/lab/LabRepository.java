@@ -83,6 +83,38 @@ public class LabRepository {
                 """, limit, offset);
     }
 
+    /**
+     * A-2 ⑥ after: 커서 페이징. 앞의 행을 세지 않고 updated_at으로 바로 시작점을 찾는다.
+     *
+     * user_rating에는 대리키가 없어서 커서 값이 id가 아니라 updated_at이다.
+     * (001-plan.md는 cursorId라고 적었지만 이 테이블에는 그런 칼럼이 없다)
+     *
+     * updated_at이 같은 행이 여러 개면 경계에서 몇 건 건너뛸 수 있다.
+     * 시딩이 마이크로초까지 랜덤이라 실제로는 거의 안 생기고,
+     * 여기서 재려는 건 정확한 페이징이 아니라 오프셋과의 비용 차이다.
+     */
+    public List<Map<String, Object>> ratingsByCursor(OffsetDateTime cursorUpdatedAt, int limit) {
+        return jdbc.queryForList("""
+                SELECT user_id, movie_id, rating, updated_at
+                FROM user_rating
+                WHERE updated_at < ?
+                ORDER BY updated_at DESC
+                LIMIT ?
+                """, cursorUpdatedAt, limit);
+    }
+
+    /** 같은 커서 방식을 특정 유저 안에서. (user_id, updated_at DESC) 인덱스를 그대로 탄다. */
+    public List<Map<String, Object>> ratingsByUserCursor(
+            long userId, OffsetDateTime cursorUpdatedAt, int limit) {
+        return jdbc.queryForList("""
+                SELECT user_id, movie_id, rating, updated_at
+                FROM user_rating
+                WHERE user_id = ? AND updated_at < ?
+                ORDER BY updated_at DESC
+                LIMIT ?
+                """, userId, cursorUpdatedAt, limit);
+    }
+
     /** A-2 ⑦ before: 조회 시점에 센다. 데이터가 많아질수록 느려진다. */
     public Map<String, Object> movieStats(long movieId) {
         return jdbc.queryForMap("""
