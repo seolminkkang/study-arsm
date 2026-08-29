@@ -1,0 +1,52 @@
+server:
+  # 0.0.0.0으로 바인딩해야 다른 노트북(k6를 돌리는 쪽)에서 접속할 수 있다.
+  # localhost로 두면 같은 기계에서만 보인다. (001-plan.md "당일 (두 대)" 참고)
+  address: 0.0.0.0
+  port: 8080
+  tomcat:
+    mbeanregistry:
+      # 이걸 켜야 tomcat_threads_busy / tomcat_threads_current가 나온다
+      # (lab/README.md ⑥의 "봐야 할 메트릭" 목록). 기본값 false에서는
+      # tomcat_sessions_* 만 노출되고 스레드 메트릭이 아예 없다. 2026-08-29 확인.
+      enabled: true
+
+spring:
+  datasource:
+    url: jdbc:postgresql://localhost:5433/labdb
+    username: lab
+    password: lab
+    hikari:
+      # 2장 실험의 핵심 노브. A-1 ④에서 2 -> 10 -> 50으로 바꾼다.
+      maximum-pool-size: 10
+      # A-1 ⑤ 재시도 증폭 실험에서 30000 -> 1000으로 바꾼다.
+      connection-timeout: 30000
+      #
+      # 커넥션 획득 시간 히스토그램(hikaricp_connections_acquire_seconds)은
+      # 여기에 아무것도 안 써도 나온다.
+      #
+      # lab/README.md ⑤에 적힌
+      #     metrics-tracker-factory: MicrometerMetricsTrackerFactory
+      # 는 넣으면 앱이 아예 안 뜬다(2026-08-29 확인). HikariConfig의
+      # metricsTrackerFactory는 String이 아니라 MetricsTrackerFactory 객체를
+      # 받는 자리라, YAML 문자열을 변환할 컨버터가 없어서 바인딩이 실패한다:
+      #     ConverterNotFoundException: No converter found capable of converting
+      #     from type [java.lang.String] to type [...MetricsTrackerFactory]
+      #
+      # actuator와 micrometer-registry-prometheus가 클래스패스에 있으면
+      # 스프링 부트의 DataSourcePoolMetricsAutoConfiguration이
+      # MicrometerMetricsTrackerFactory를 알아서 꽂아준다. 그래서 이 줄은 불필요하다.
+
+  jpa:
+    # 스키마는 01_schema.sql이 만든다. 앱이 건드리면 안 된다.
+    hibernate:
+      ddl-auto: none
+    open-in-view: false
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,prometheus
+  endpoint:
+    health:
+      show-details: always

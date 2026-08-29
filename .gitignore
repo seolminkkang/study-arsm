@@ -14,6 +14,9 @@ build/
 target/
 .gradle/
 *.jar
+# gradle wrapper의 jar는 커밋한다. 이게 없으면 clone한 쪽에서
+# ./gradlew 가 아예 안 돈다 (SETUP.md 4번이 이걸 시킨다).
+!**/gradle/wrapper/gradle-wrapper.jar
 
 # 옵시디언 로컬 상태 (플러그인 설정은 공유해도 됨)
 vault/.obsidian/workspace.json
