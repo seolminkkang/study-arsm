@@ -12,6 +12,23 @@ tags: [cheatsheet]
 
 한 대에서 진행한다. 총 2시간 30분.
 
+> 오늘 답하는 질문: **"느리다"고 할 때, 어디가 느린지 어떻게 찾는가**
+>
+> B급  = DB 안에서 찾는 법 (쿼리 하나 단위)
+> A-1 = 서버 전체에서 찾는 법 (부하 걸었을 때)
+> A-2 = 찾았으면 고쳐본다. 근데 고치는 것도 함정이 있다
+
+### 결과 나오면 뭐라고 하나
+
+> **설명하려고 하지 마라. 어긋난 걸 짚기만 한다.**
+>
+> - "위는 Index Scan인데 아래는 Seq Scan이네. 뭐가 달랐지?"
+> - "부하는 올리는데 TPS가 안 오르네. 근데 p95는 올라가"
+> - "인덱스 걸었는데 더 느려졌네"
+>
+> 답은 둘이 같이 찾는다. Host가 답을 갖고 있을 필요 없다.
+> 개념 설명이 필요하면 그때 책을 편다. 외워서 하지 않는다.
+
 > **배수를 인용하지 말 것.**
 > B-3이 회차 간 1,788배 → 128배로 요동쳤고(OS 페이지 캐시), 풀 실험도 25% 편차가 있다.
 > "3배" "100배" 대신 **"빨라진다 / 느려진다 / 안 변한다"** 방향만 말한다.
@@ -113,7 +130,11 @@ docker exec -i lab-postgres psql -U lab -d labdb < 00_find_test_ids.sql
 
 ## B급 4개 (20분)
 
+> 네 개 다 같은 얘기다 — **인덱스가 있어도 안 먹는 경우들.**
+
 ### B-1 타입 다른 칼럼 조인 (5분)
+
+> 보여주는 것: **타입이 안 맞으면** 인덱스가 무용지물이 된다
 
 ```bash
 docker exec lab-postgres psql -U lab -d labdb -c "
@@ -139,6 +160,8 @@ WHERE m.movie_id = 60300;"
 
 ### B-2 선택도 전환점 (5분)
 
+> 보여주는 것: **너무 많이 읽으면** DB가 인덱스를 스스로 포기한다
+
 ```bash
 docker exec lab-postgres psql -U lab -d labdb -c "
 EXPLAIN ANALYZE SELECT * FROM user_rating WHERE user_id = 36;"
@@ -156,6 +179,8 @@ EXPLAIN ANALYZE SELECT * FROM user_rating WHERE user_id BETWEEN 1 AND 1150;"
 
 ### B-3 커버링 인덱스 (5분)
 
+> 보여주는 것: **컬럼 하나 더 요구하면** 테이블을 읽으러 간다
+
 ```bash
 docker exec lab-postgres psql -U lab -d labdb -c "
 EXPLAIN ANALYZE SELECT movie_id, rating FROM user_rating WHERE movie_id = 60300;"
@@ -168,6 +193,8 @@ EXPLAIN ANALYZE SELECT movie_id, rating, updated_at FROM user_rating WHERE movie
 ❓ **"칼럼 하나 더 달라고 했을 뿐인데 왜 테이블을 읽으러 갈까?"**
 
 ### B-4 복합 인덱스 컬럼 순서 (5분)
+
+> 보여주는 것: **컬럼 순서**가 중요한데, 쿼리 모양에 따라 안 중요할 수도 있다
 
 ```bash
 docker exec lab-postgres psql -U lab -d labdb -c "
@@ -198,9 +225,17 @@ docker exec lab-postgres psql -U lab -d labdb -c "\di"
 ```
 → 다시 5줄(기본키 3 + 베이스라인 2)로 돌아왔는지 확인
 
+> 묶으면: 인덱스 걸었다고 끝이 아니다. 쿼리가 어떻게 생겼냐에 따라 달라진다.
+
 ---
 
+> **여기까지는 쿼리 하나씩 봤다. 이제 부하를 걸어서 서버 전체를 본다.**
+
 ## A-1 관찰 (25분)
+
+> 보여주는 것: **공식은 상한선일 뿐이고, 진짜 병목은 화면에서 찾아야 한다.**
+> 흐름: 부하 → 처리량 안 오름 → 계산해보니 14배 차이 → 뭐가 빠졌지 →
+>       DB CPU 197% → 풀을 늘리면? → 오히려 줄어듦
 
 Grafana **A-1 한 화면** 띄워놓고 시작.
 
@@ -324,7 +359,13 @@ k6 run -o experimental-prometheus-rw -e COND=B -e PROFILE=rehearsal timeout-ampl
 
 ---
 
+> **여기까지는 병목을 찾았다. 이제 고쳐본다.**
+
 ## A-2 (25분)
+
+> 보여주는 것: **같은 인덱스가 한쪽은 빠르게, 한쪽은 느리게 만든다.**
+> 흐름: 오프셋 느림 → "인덱스 걸면 되겠네" → 걸었더니 더 느려짐 → 왜? → 커서로 교체
+> **이 회차의 하이라이트다.** 확신을 갖고 예측한 게 정반대로 나온다.
 
 ### 오프셋 vs 커서 (15분)
 
