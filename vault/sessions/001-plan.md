@@ -55,26 +55,49 @@ Moha 원본에는 varchar↔int 조인이 없으므로 실습용 칼럼을 하�
 2026-08-28 파일럿에서 `r.movie_id_str = m.movie_id::varchar`로 썼다가
 인덱스가 잘 타버려서 걸렸다 — `m.movie_id`(인덱스 없음) 쪽을 캐스팅했기 때문.
 
+**비교 조건 — 변수는 조인 칼럼의 타입 하나뿐이다.**
+
+2026-08-30에 한 번 더 고쳤다. 이전 안은 ①이 단일 테이블 조회,
+②가 조인이라 **조건이 두 개 달랐다** — 타입 때문인지 조인 때문인지 구분이 안 됐다.
+**둘 다 조인으로 맞추고 타입만 변수로 남긴다.**
+
+| | 쿼리 ① | 쿼리 ② |
+|---|---|---|
+| 형태 | `user_rating` ⋈ `movies` | 조인 (고정) |
+| 조인 칼럼 | `r.movie_id` (bigint) | `r.movie_id_str::int` (varchar→int) ← **변수** |
+| 결과 | 영화 60300의 평점 10,339건 | 똑같음 |
+
 ```sql
 ALTER TABLE user_rating ADD COLUMN movie_id_str varchar(20);
 UPDATE user_rating SET movie_id_str = movie_id::text;
 CREATE INDEX idx_rating_movie_str ON user_rating(movie_id_str);
 ANALYZE user_rating;
 
--- 인덱스를 타는 쪽 (movie_id_str에 직접 비교, 실존하는 movie_id로)
+-- ① 타입 같음 (bigint : bigint)
 EXPLAIN ANALYZE
-SELECT * FROM user_rating WHERE movie_id_str = '60300';
+SELECT r.* FROM user_rating r JOIN movies m
+ON r.movie_id = m.movie_id WHERE m.movie_id = 60300;
 
--- 타입이 안 맞는 쪽: 캐스팅이 인덱스 걸린 컬럼(movie_id_str)에 걸린다
+-- ② 타입 다름 (varchar->int : bigint)
 EXPLAIN ANALYZE
-SELECT r.* FROM user_rating r JOIN movies m ON r.movie_id_str::int = m.movie_id
-WHERE m.movie_id = 60300;
+SELECT r.* FROM user_rating r JOIN movies m
+ON r.movie_id_str::int = m.movie_id WHERE m.movie_id = 60300;
 ```
 
-**볼 것:** `Seq Scan`(또는 `Parallel Seq Scan`)이 뜨는지, `Filter`에 타입 변환이 걸려 있는지
+**실측 (2026-08-30)**
+
+| | ① 타입 같음 | ② 타입 다름 |
+|---|---|---|
+| 스캔 | `Bitmap Index Scan on idx_user_rating__movie_rating` | `Parallel Seq Scan` |
+| Filter | 없음 | `((movie_id_str)::integer = 60300)` |
+| 버린 행 | — | `Rows Removed by Filter: 1,673,220` |
+| Execution | 약 230ms | 약 472ms |
 
 쿼리에 쓰는 movie_id는 실제로 존재하는 값이어야 한다(`42`는 이 데이터셋에 없어서
 두 쿼리 다 0행이 나와 비교가 안 됐다). `00_find_test_ids.sql`로 확인한 값을 쓴다.
+
+**끝나면 즉시 원복 + `VACUUM FULL`.** `UPDATE` 503만 건이 테이블을 735MB로
+부풀리고, 그대로 두면 B-2 전환점이 바뀐다(아래 B-2 참고).
 
 ## B-2. 선택도 — 전환점 찾기
 
@@ -120,7 +143,46 @@ EXPLAIN ANALYZE SELECT * FROM user_rating WHERE user_id BETWEEN 1 AND 5000;     
 `Index Scan`이었는데 `VACUUM FULL` 후 `Bitmap Heap Scan`으로 바뀌었다 —
 테이블을 다시 쓰면서 한 유저의 행이 연속 페이지에 모인 영향으로 보인다(#가설).
 
-**전환점: 전체의 약 33~36%** (깨끗한 테이블 기준, 2026-08-30 재측정).
+**전환점: 전체의 약 36%** (깨끗한 테이블 기준, 2026-08-30 재측정).
+
+### 발견 — "몇 %부터"라는 고정된 답이 없다 (책에 없는 내용)
+
+2026-08-30에 **같은 날, 같은 테이블 크기(367MB), 같은 쿼리**로 두 번 쟀는데
+`BETWEEN 1 AND 4500`(36.2%)의 선택이 뒤집혔다.
+
+```
+오전  Bitmap Heap Scan  cost=46366.52..120563.96   <- 선택됨 (5회 모두 동일)
+      Seq Scan          cost=    0.00..122459.40
+
+오후  Seq Scan          cost=    0.00..122461.05   <- 선택됨 (3회 모두 동일)
+      Bitmap Heap Scan  cost=47128.71..121774.25   (강제로 재보면 오히려 싸다)
+```
+
+사이에 한 일은 B-1을 돌렸다 원복한 것뿐이다.
+**두 계획의 비용이 1% 안쪽으로 붙어 있어서** 통계가 조금만 흔들려도 결과가 바뀐다.
+
+한 자리에서 연속으로 세 번 치면 대개 같게 나온다. 갈리는 건 통계가 바뀌는
+순간이다 — autovacuum이 도는 중이거나 테이블을 막 건드린 직후.
+
+**그래서 회차 메시지를 이렇게 잡는다.**
+
+> "몇 %부터 인덱스를 포기한다"는 고정된 답이 없다.
+> 옵티마이저가 매번 비용을 계산해서 판단하고, 경계 근처에서는
+> 같은 쿼리도 결과가 달라진다.
+> 전환점은 데이터 양뿐 아니라 **테이블이 디스크에 어떻게 놓여 있느냐,
+> 통계가 언제 갱신됐느냐**에 따라 움직인다.
+
+**진행은 4단계로 한다.** 3단계에서 같은 명령을 세 번 연속 친다.
+
+| 단계 | 조건 | 행수 | 비율 | 결과 |
+|---|---|---|---|---|
+| 1 | `user_id = 46401` | 17 | 0.0003% | `Index Scan` |
+| 2 | `user_id = 36` | 5,000 | 0.10% | `Bitmap Heap Scan` |
+| 3 | `BETWEEN 1 AND 4500` | 1,820,000 | 36.2% | **경계 — 갈릴 수 있다** |
+| 4 | `BETWEEN 1 AND 8000` | 2,870,000 | 57.1% | `Seq Scan` (3회 확인, 안정) |
+
+4단계 값은 "확실히 Seq Scan이 나오는 값"을 찾으려고 5000/8000/20000/50000/90000을
+각각 3회씩 돌려서 정했다. 전부 안정적으로 `Seq Scan`이다.
 
 ### ⚠ 전환점은 고정된 숫자가 아니다 — 2026-08-30에 세 번 다르게 나왔다
 

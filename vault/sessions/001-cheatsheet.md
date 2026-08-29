@@ -35,6 +35,21 @@ tags: [cheatsheet]
 > B-3이 회차 간 1,788배 → 128배로 요동쳤고(OS 페이지 캐시), 풀 실험도 25% 편차가 있다.
 > "3배" "100배" 대신 **"빨라진다 / 느려진다 / 안 변한다"** 방향만 말한다.
 
+### 원복 규칙 — 실험이 만든 건 그 실험 끝나면 바로 지운다
+
+| 실험 | 만드는 것 | 지우는 시점 |
+|---|---|---|
+| B-1 | `movie_id_str` 칼럼 + `idx_rating_movie_str` | **B-1 직후 (`VACUUM FULL` 필수)** |
+| B-4 | `idx_test_reversed` / `user_updated` 인덱스를 지움 | **B-4 직후** |
+| A-2 ⑥ | `idx_user_rating__updated` | **A-2 직후** |
+| A-2 ⑦ | `movies.rating_count`, `rating_sum` | **A-2 직후** |
+
+> 이전 실험이 남긴 칼럼·인덱스가 다음 실험의 실행계획을 바꾼다.
+> 테이블 구조가 바뀌면 옵티마이저 판단도 바뀐다.
+
+**B-1만 `VACUUM FULL`이 필요하다.** `UPDATE` 503만 건이 테이블을 735MB로
+부풀리는데 칼럼만 지워서는 안 돌아온다. 나머지는 인덱스만 만들므로 불필요.
+
 ---
 
 ## 시작 전 확인 (10분)
@@ -138,6 +153,16 @@ docker exec -i lab-postgres psql -U lab -d labdb < 00_find_test_ids.sql
 
 > 보여주는 것: **타입이 안 맞으면** 인덱스가 무용지물이 된다
 
+**비교 조건 — 변수는 하나뿐이다**
+
+| | 쿼리 ①  | 쿼리 ② |
+|---|---|---|
+| 하는 일 | 영화 60300의 평점 전부 가져오기 | (똑같음) |
+| 형태 | `user_rating` ⋈ `movies` 조인 | **조인 (고정)** |
+| 조인 칼럼 | `r.movie_id` (bigint) | **`r.movie_id_str::int` (varchar→int)** ← 변수 |
+| 인덱스 | 양쪽 다 있음 | 양쪽 다 있음 (고정) |
+
+**준비** — 실습용 문자열 칼럼과 인덱스를 만든다 (한 번에 실행, 약 30초)
 ```bash
 docker exec lab-postgres psql -U lab -d labdb -c "
 ALTER TABLE user_rating ADD COLUMN movie_id_str varchar(20);
@@ -146,26 +171,31 @@ CREATE INDEX idx_rating_movie_str ON user_rating(movie_id_str);
 ANALYZE user_rating;"
 ```
 
+**① 타입 같음 (bigint ↔ bigint)** — 영화 60300에 달린 평점을 조인으로 가져온다
 ```bash
 docker exec lab-postgres psql -U lab -d labdb -c "
-EXPLAIN ANALYZE SELECT * FROM user_rating WHERE movie_id_str = '60300';"
+EXPLAIN ANALYZE SELECT r.* FROM user_rating r JOIN movies m
+ON r.movie_id = m.movie_id WHERE m.movie_id = 60300;"
 ```
+
+**② 타입 다름 (varchar→int ↔ bigint)** — 완전히 같은 결과를 문자열 칼럼으로 조인
 ```bash
 docker exec lab-postgres psql -U lab -d labdb -c "
-EXPLAIN ANALYZE SELECT r.* FROM user_rating r JOIN movies m ON r.movie_id_str::int = m.movie_id
-WHERE m.movie_id = 60300;"
+EXPLAIN ANALYZE SELECT r.* FROM user_rating r JOIN movies m
+ON r.movie_id_str::int = m.movie_id WHERE m.movie_id = 60300;"
 ```
 
-👉 가리킬 곳: 위는 `Bitmap Index Scan`, 아래는 `Parallel Seq Scan` + `Filter: ((movie_id_str)::integer = 60300)`
+👉 가리킬 곳
 
-❓ **"인덱스가 분명히 있는데 왜 아래는 안 탔을까?"**
+| | ① 타입 같음 | ② 타입 다름 |
+|---|---|---|
+| 스캔 | `Bitmap Index Scan on idx_user_rating__movie_rating` | **`Parallel Seq Scan`** |
+| Filter | 없음 | `((movie_id_str)::integer = 60300)` |
+| 버린 행 | — | `Rows Removed by Filter: 1,673,220` |
 
-> ### ⚠ B-2로 넘어가기 전에 반드시 — 안 하면 B-2 결과가 달라진다
->
-> B-1의 `UPDATE 5030000`이 테이블을 **735MB로 2배 부풀린다.**
-> 컬럼만 지우면 안 되고 `VACUUM FULL`까지 해야 327MB로 돌아온다.
-> 안 하면 B-2 전환점이 36% → 10%로 바뀐다. (2026-08-30에 실제로 겪음)
+❓ **"차이는 `movie_id` 하나뿐인데 왜 아래만 인덱스를 못 탈까?"**
 
+**B-1 원복 — 여기서 바로 한다** (한 번에 실행, 약 10초)
 ```bash
 cd C:/seolmin/backend-study/lab/sql
 docker exec -i lab-postgres psql -U lab -d labdb < 99_cleanup.sql
@@ -175,78 +205,214 @@ docker exec lab-postgres psql -U lab -d labdb -c "ANALYZE user_rating;"
 docker exec lab-postgres psql -U lab -d labdb -c "
 SELECT pg_size_pretty(pg_relation_size('user_rating'));"
 ```
-→ **327 MB** 나오면 정상. 735MB면 `VACUUM FULL`이 안 된 것. (약 6초 걸린다)
+→ **367 MB 근처면 정상.** 735MB면 `VACUUM FULL`이 안 된 것.
+안 하면 B-2 전환점이 36% → 10%로 바뀐다.
 
-### B-2 선택도 전환점 (5분) · 3장 「선택도를 고려한 인덱스 칼럼 선택」
+### B-2 선택도 (5분) · 3장 「선택도를 고려한 인덱스 칼럼 선택」
 
-> 보여주는 것: **너무 많이 읽으면** DB가 인덱스를 스스로 포기한다
+> 보여주는 것: **너무 많이 읽으면** DB가 인덱스를 스스로 포기한다.
+> 그런데 **"몇 %부터"라는 고정된 답은 없다.**
 
+**비교 조건 — 쿼리는 똑같다. 조회 범위만 넓어진다**
+
+| 단계 | 조건 | 행수 | 비율 |
+|---|---|---|---|
+| 1 | `user_id = 46401` (라이트 유저) | 17 | 0.0003% |
+| 2 | `user_id = 36` (헤비 유저) | 5,000 | 0.10% |
+| 3 | `user_id BETWEEN 1 AND 4500` | 1,820,000 | 36.2% ← 경계 |
+| 4 | `user_id BETWEEN 1 AND 8000` | 2,870,000 | 57.1% |
+
+**1단계** — 평점 17건짜리 라이트 유저 한 명을 조회한다
 ```bash
 docker exec lab-postgres psql -U lab -d labdb -c "
 EXPLAIN ANALYZE SELECT * FROM user_rating WHERE user_id = 46401;"
+```
+→ `Index Scan`
+
+**2단계** — 평점 5,000건짜리 헤비 유저 한 명을 조회한다
+```bash
 docker exec lab-postgres psql -U lab -d labdb -c "
 EXPLAIN ANALYZE SELECT * FROM user_rating WHERE user_id = 36;"
+```
+→ `Bitmap Heap Scan`
+
+❓ **"이건 몇 % 정도일 것 같아? 어느 쪽으로 갈까?"** ← 3단계 치기 전에
+
+**3단계 (경계)** — 전체의 약 36%. **같은 명령을 세 번 연속 친다**
+```bash
 docker exec lab-postgres psql -U lab -d labdb -c "
-EXPLAIN ANALYZE SELECT * FROM user_rating WHERE user_id BETWEEN 1 AND 4000;"
+EXPLAIN SELECT * FROM user_rating WHERE user_id BETWEEN 1 AND 4500;"
+```
+```bash
 docker exec lab-postgres psql -U lab -d labdb -c "
-EXPLAIN ANALYZE SELECT * FROM user_rating WHERE user_id BETWEEN 1 AND 4500;"
+EXPLAIN SELECT * FROM user_rating WHERE user_id BETWEEN 1 AND 4500;"
+```
+```bash
+docker exec lab-postgres psql -U lab -d labdb -c "
+EXPLAIN SELECT * FROM user_rating WHERE user_id BETWEEN 1 AND 4500;"
 ```
 
-👉 가리킬 곳: 스캔 방식이 3단계로 갈린다
+👉 **`cost` 숫자를 본다.** 두 계획이 1% 안쪽으로 붙어 있다.
 
-| 쿼리 | 행수 | 비율 | 스캔 방식 |
-|---|---|---|---|
-| `= 46401` (라이트) | 17 | 0.0003% | **Index Scan** |
-| `= 36` (헤비) | 5,000 | 0.10% | **Bitmap Heap Scan** |
-| `BETWEEN 1 AND 4000` | 1,670,000 | 33.2% | Bitmap Heap Scan |
-| `BETWEEN 1 AND 4500` | 1,820,000 | 36.2% | **Seq Scan** |
+2026-08-30 같은 날 같은 테이블 크기(367MB)에서 두 번 쟀는데 **선택이 뒤집혔다.**
 
-❓ **"4000에서 4500으로 늘렸을 뿐인데 왜 계획이 통째로 바뀌지?"**
+```
+오전  Bitmap Heap Scan  cost=46366.52..120563.96   <- 선택됨 (5회 모두)
+      Seq Scan          cost=    0.00..122459.40
 
-> **전환점 숫자를 외우게 하지 말 것.** 같은 DB에서 어제 16%, B-1 직후 10%,
-> 청소 후 36%가 나왔다. **데이터 양이 아니라 테이블이 디스크에 어떻게
-> 놓여 있느냐가 정한다.** 시간 남으면 이걸 그대로 보여줘도 좋다.
+오후  Seq Scan          cost=    0.00..122461.05   <- 선택됨 (3회 모두)
+      Bitmap Heap Scan  cost=47128.71..121774.25   (강제로 재보면 오히려 싸다)
+```
+
+사이에 한 일은 B-1을 돌렸다 원복한 것뿐이다.
+
+❓ **"세 번 다 같았어? 두 계획 cost 차이가 몇 %야?"**
+
+> **한 자리에서 세 번 치면 보통 같게 나온다.** 갈리는 건 통계가 바뀌는 순간
+> (autovacuum이 돌 때, 테이블을 건드린 직후)이다.
+> 안 갈려도 상관없다 — **cost가 1% 차이라는 것 자체**가 보여줄 거리다.
+> 이 지점은 "인덱스를 쓰는 게 맞나"를 DB도 확신하지 못하는 구간이다.
+
+**4단계** — 전체의 57%. 여기는 흔들리지 않는다 (3회 확인)
+```bash
+docker exec lab-postgres psql -U lab -d labdb -c "
+EXPLAIN ANALYZE SELECT * FROM user_rating WHERE user_id BETWEEN 1 AND 8000;"
+```
+→ `Seq Scan`
+
+**메시지**
+
+> **"몇 %부터 인덱스를 포기한다"는 고정된 답이 없다.**
+> 옵티마이저가 매번 비용을 계산해서 판단하고, 경계 근처에서는
+> 같은 쿼리도 결과가 달라진다.
+> 전환점은 데이터 양뿐 아니라 **테이블이 디스크에 어떻게 놓여 있느냐,
+> 통계가 언제 갱신됐느냐**에 따라 움직인다.
+> 실제로 같은 DB에서 16.2% → 10.5% → 36.2%로 세 번 다르게 나왔다.
+
+**B-2는 만든 게 없다. 원복 불필요.**
 
 ### B-3 커버링 인덱스 (5분) · 3장 「커버링 인덱스 활용하기」
 
 > 보여주는 것: **컬럼 하나 더 요구하면** 테이블을 읽으러 간다
 
+**비교 조건 — WHERE는 같다. SELECT 목록만 다르다**
+
+| | 쿼리 ① | 쿼리 ② |
+|---|---|---|
+| WHERE | `movie_id = 60300` | 똑같음 (고정) |
+| SELECT | `movie_id, rating` | `movie_id, rating, **updated_at**` ← 변수 |
+| 인덱스 | `(movie_id, rating)` | 똑같음 (고정) |
+
+인덱스가 `(movie_id, rating)`이라 ①이 원하는 값은 **인덱스 안에 다 있다.**
+②의 `updated_at`은 인덱스에 없어서 테이블을 찾아가야 한다.
+
+**① 인덱스만으로 끝나는 쿼리** — 영화 60300의 평점 값만 가져온다
 ```bash
 docker exec lab-postgres psql -U lab -d labdb -c "
 EXPLAIN ANALYZE SELECT movie_id, rating FROM user_rating WHERE movie_id = 60300;"
+```
+
+**② 칼럼 하나만 더 요구** — 같은 조건에 `updated_at`을 추가로 가져온다
+```bash
 docker exec lab-postgres psql -U lab -d labdb -c "
 EXPLAIN ANALYZE SELECT movie_id, rating, updated_at FROM user_rating WHERE movie_id = 60300;"
 ```
 
-👉 가리킬 곳: 위 `Index Only Scan` + `Heap Fetches: 0` / 아래 `Bitmap Heap Scan` + `Heap Blocks: exact=9315`
+👉 가리킬 곳
+
+| | ① | ② |
+|---|---|---|
+| 스캔 | **`Index Only Scan`** | `Bitmap Heap Scan` |
+| 테이블 접근 | `Heap Fetches: 0` | `Heap Blocks: exact=...` (수천 개) |
 
 ❓ **"칼럼 하나 더 달라고 했을 뿐인데 왜 테이블을 읽으러 갈까?"**
+
+**B-3은 만든 게 없다. 원복 불필요.**
 
 ### B-4 복합 인덱스 컬럼 순서 (5분) · 3장 「단일 인덱스와 복합 인덱스」
 
 > 보여주는 것: **컬럼 순서**가 중요한데, 쿼리 모양에 따라 안 중요할 수도 있다
 
+#### 구조 먼저 — 총 4번 실행한다
+
+쿼리 2개 × 인덱스 2개. **쿼리는 바뀌지 않는다. 바뀌는 건 인덱스 컬럼 순서뿐이다.**
+
+| | 인덱스 ① `(user_id, updated_at DESC)` | 인덱스 ② `(updated_at DESC, user_id)` |
+|---|---|---|
+| 쿼리 A (ORDER BY + LIMIT) | **1번** | **3번** |
+| 쿼리 B (정렬 없음) | **2번** | **4번** |
+
+**쿼리 설명**
+
+- **쿼리 A** — 36번 사용자의 2026년 이후 평점 중 **최신 100개**
+- **쿼리 B** — 같은 조건, **정렬 없이 전부**
+
+WHERE 절은 완전히 같다. 차이는 `ORDER BY updated_at DESC LIMIT 100` 뿐이다.
+
+**인덱스 설명**
+
+- **①** `(user_id, updated_at DESC)` — 전화번호부가 **성 → 이름** 순
+- **②** `(updated_at DESC, user_id)` — **이름 → 성** 순
+
+`user_id`로 찾을 땐 ①이 유리하다. 하지만 `ORDER BY updated_at`이 있으면
+②도 쓸모가 생긴다 — 이미 시간순이라 최신부터 걷다가 100개 채우면 멈춘다.
+**LIMIT이 없으면 멈출 수 없어서 전체를 훑는다.**
+
+❓ **"순서를 뒤집으면 나빠질까? 두 쿼리 다 똑같이?"** ← 여기서 글로 적는다
+
+#### 1번 — 인덱스 ① · 쿼리 A (ORDER BY + LIMIT)
 ```bash
 docker exec lab-postgres psql -U lab -d labdb -c "
 EXPLAIN ANALYZE SELECT * FROM user_rating
-WHERE user_id = 36 AND updated_at >= '2026-01-01' ORDER BY updated_at DESC LIMIT 100;"
+WHERE user_id = 36 AND updated_at >= '2026-01-01'
+ORDER BY updated_at DESC LIMIT 100;"
+```
+
+#### 2번 — 인덱스 ① · 쿼리 B (정렬 없음)
+```bash
 docker exec lab-postgres psql -U lab -d labdb -c "
 EXPLAIN ANALYZE SELECT * FROM user_rating
 WHERE user_id = 36 AND updated_at >= '2026-01-01';"
 ```
 
+#### 인덱스 갈아끼우기
 ```bash
 docker exec lab-postgres psql -U lab -d labdb -c "
 CREATE INDEX idx_test_reversed ON user_rating(updated_at DESC, user_id);
 DROP INDEX idx_user_rating__user_updated;
 ANALYZE user_rating;"
 ```
-→ 위 두 쿼리 다시 실행
 
-❓ **"순서를 뒤집으면 나빠질까? ORDER BY가 있을 때랑 없을 때 같을까?"**
-(정답 미리 말하지 말 것 — ORDER BY 있으면 거의 안 변하고, 없으면 크게 나빠진다)
+> **원래 인덱스를 지우는 이유:** 둘 다 있으면 DB가 좋은 쪽을 골라 써서
+> 뒤집은 효과가 안 보인다.
 
-**B급 끝나면 원복:**
+#### 3번 — 인덱스 ② · 쿼리 A (1번과 완전히 같은 쿼리)
+```bash
+docker exec lab-postgres psql -U lab -d labdb -c "
+EXPLAIN ANALYZE SELECT * FROM user_rating
+WHERE user_id = 36 AND updated_at >= '2026-01-01'
+ORDER BY updated_at DESC LIMIT 100;"
+```
+
+#### 4번 — 인덱스 ② · 쿼리 B (2번과 완전히 같은 쿼리)
+```bash
+docker exec lab-postgres psql -U lab -d labdb -c "
+EXPLAIN ANALYZE SELECT * FROM user_rating
+WHERE user_id = 36 AND updated_at >= '2026-01-01';"
+```
+
+👉 결과표 (2026-08-29 실측 — **방향만 본다**)
+
+| | 쿼리 A (ORDER BY) | 쿼리 B (없음) |
+|---|---|---|
+| 인덱스 ① | 1.4ms | 0.9ms |
+| 인덱스 ② | 2.3ms | 93.8ms |
+| | **거의 안 변함** | **크게 나빠짐** |
+
+❓ **"왜 한쪽만 크게 나빠졌지? 두 쿼리 차이가 뭐였지?"**
+(정답 미리 말하지 말 것)
+
+**B-4 원복 — 여기서 바로 한다**
 ```bash
 cd C:/seolmin/backend-study/lab/sql
 docker exec -i lab-postgres psql -U lab -d labdb < 99_cleanup.sql
@@ -254,8 +420,17 @@ docker exec -i lab-postgres psql -U lab -d labdb < 04_indexes.sql
 docker exec lab-postgres psql -U lab -d labdb -c "ANALYZE user_rating;"
 docker exec lab-postgres psql -U lab -d labdb -c "\di"
 ```
-→ 다시 5줄(기본키 3 + 베이스라인 2)로 돌아왔는지 확인
-(B-1 직후에 이미 `VACUUM FULL`을 했으면 여기선 안 해도 된다)
+→ 5줄(기본키 3 + 베이스라인 2). `idx_test_reversed`가 없어야 한다.
+`VACUUM FULL`은 필요 없다 — 인덱스만 만들었으므로.
+
+**B급 끝. 상태 확인만 한 번:**
+```bash
+docker exec lab-postgres psql -U lab -d labdb -c "\di"
+docker exec lab-postgres psql -U lab -d labdb -c "
+SELECT pg_size_pretty(pg_relation_size('user_rating'));"
+```
+→ 인덱스 5줄, 테이블 367MB 근처.
+(원복은 B-1·B-4 각 실험 끝에 이미 했다. 여기서 또 할 필요 없다)
 
 > 묶으면: 인덱스 걸었다고 끝이 아니다. 쿼리가 어떻게 생겼냐에 따라 달라진다.
 
@@ -271,17 +446,31 @@ docker exec lab-postgres psql -U lab -d labdb -c "\di"
 > 흐름: 부하 → 처리량 안 오름 → 계산해보니 14배 차이 → 뭐가 빠졌지 →
 >       DB CPU 197% → 풀을 늘리면? → 오히려 줄어듦
 
+**비교 조건 — 앱 설정만 바꾼다. 부하도 쿼리도 고정**
+
+| | 고정 | 변수 |
+|---|---|---|
+| 쿼리 | `/lab/ratings?offset=4900000&limit=10` (한 건 약 1.16초) | — |
+| 부하 | 워밍업 1 rps 60초 → 1→2→4 rps 각 60초 | — |
+| DB | CPU 2개, 메모리 2GB | — |
+| 앱 설정 | — | **커넥션 풀 2 / 10 / 50** |
+| 앱 설정 | — | **connection-timeout 30초 / 1초** |
+
 Grafana **A-1 한 화면** 띄워놓고 시작.
 
+**환경변수 (한 번만, 터미널 새로 열면 다시)**
 ```bash
 cd C:/seolmin/backend-study/lab/k6
 export K6_PROMETHEUS_RW_SERVER_URL=http://localhost:9090/api/v1/write
 export K6_PROMETHEUS_RW_TREND_STATS="p(95),p(99),avg,max"
+```
 
+**기준 측정 (풀 10)** — 지금 앱이 풀 10이므로 그대로 돌린다. 4분
+```bash
 k6 run -o experimental-prometheus-rw -e POOL=10 -e PROFILE=rehearsal pool-size.js \
   | tee ../../vault/raw/$(date +%F)_exp-001_session_k6-pool10.txt
 ```
-소요 4분. 워밍업 1분은 버린다.
+워밍업 1분 구간은 버린다.
 
 ❓ **"이 숫자들 중에 뭐가 이상해?"**
 
@@ -327,69 +516,110 @@ curl -s -o /dev/null -w "%{time_total}\n" "http://localhost:8080/lab/ratings?off
 
 ## A-1 실행 (25분)
 
-### 앱 재시작 (Windows)
+> **앱 재시작 두 가지 주의**
+> - `pkill`은 Windows에서 안 먹는다. 아래 PowerShell 명령을 쓴다.
+> - 풀 크기·타임아웃은 **재빌드 없이 JVM `-D` 인자**로 바꾼다.
+>   `application.yml`을 고치지 않으므로, `exp` 커밋 메시지에 어떤 인자로
+>   돌렸는지 반드시 적어야 재현된다.
+> - `java -jar`는 터미널을 붙잡는다. **k6는 새 터미널에서** 돌린다.
 
-`pkill`은 안 먹는다. 이걸 쓴다:
+### 풀 2 → 풀 50 (각 5분)
 
+**풀 2로 앱 재시작**
 ```bash
 powershell.exe -NoProfile -Command "Get-NetTCPConnection -LocalPort 8080 -State Listen -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id \$_.OwningProcess -Force }"
-```
-
-풀 크기는 재빌드 없이 JVM 인자로:
-```bash
 cd C:/seolmin/backend-study/lab/app
 java -Dspring.datasource.hikari.maximum-pool-size=2 -jar build/libs/lab-app-0.0.1.jar
 ```
-확인:
+새 터미널에서 확인 → `max=2.0`
 ```bash
-curl -s http://localhost:8080/actuator/prometheus | grep hikaricp_connections_max
+curl -s http://localhost:8080/actuator/prometheus | grep "^hikaricp_connections_max"
 ```
 
-### 풀 2 / 10 / 50 (각 5분)
-
+**풀 2 부하** (4분)
 ```bash
-# --- 풀 2 ---
+cd C:/seolmin/backend-study/lab/k6
 k6 run -o experimental-prometheus-rw -e POOL=2 -e PROFILE=rehearsal pool-size.js \
   | tee ../../vault/raw/$(date +%F)_exp-001_session_k6-pool2.txt
+```
 
-# --- 풀 50 ---
+**풀 50으로 앱 재시작**
+```bash
+powershell.exe -NoProfile -Command "Get-NetTCPConnection -LocalPort 8080 -State Listen -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id \$_.OwningProcess -Force }"
+cd C:/seolmin/backend-study/lab/app
+java -Dspring.datasource.hikari.maximum-pool-size=50 -jar build/libs/lab-app-0.0.1.jar
+```
+
+**풀 50 부하** (4분)
+```bash
+cd C:/seolmin/backend-study/lab/k6
 k6 run -o experimental-prometheus-rw -e POOL=50 -e PROFILE=rehearsal pool-size.js \
   | tee ../../vault/raw/$(date +%F)_exp-001_session_k6-pool50.txt
 ```
 
-👉 가리킬 곳: Grafana 3번 패널의 `active`가 풀 크기까지 차고 `pending`이 쌓인다. 1번(TPS)은 세 번 다 비슷하다.
+👉 가리킬 곳: Grafana 3번 패널의 `active`가 풀 크기까지 차고 `pending`이 쌓인다.
+**1번(TPS)은 세 번 다 비슷하다.**
+
+참고 실측 (2026-08-29, 무거운 쿼리 6건 동시 — **방향만**)
+
+| 풀 | 처리량 | 산술 모델 예측 |
+|---|---|---|
+| 2 | 0.73 TPS | 1.7 |
+| 10 | 0.58 TPS | 8.6 |
+| 50 | 0.55 TPS | 43.1 |
 
 ❓ **"예측 맞았어? 풀을 25배 키웠는데 처리량이 왜 안 늘지?"**
 
 ### 타임아웃 증폭 (10분)
 
+**비교 조건 — 커넥션 타임아웃만 다르다**
+
+| | 조건 A | 조건 B |
+|---|---|---|
+| `connection-timeout` | **30초** | **1초** ← 변수 |
+| 풀 크기 | 10 (기본) | 10 (고정) |
+| k6 재시도 | 켬 (3초 참았다 재요청, 최대 2회) | 똑같음 (고정) |
+| 부하 | 2 → 5 rps | 똑같음 (고정) |
+
+**조건 A — 앱 재시작 (타임아웃 30초)**
 ```bash
-# 조건 A — 30초
 powershell.exe -NoProfile -Command "Get-NetTCPConnection -LocalPort 8080 -State Listen -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id \$_.OwningProcess -Force }"
 cd C:/seolmin/backend-study/lab/app
 java -Dspring.datasource.hikari.connection-timeout=30000 -jar build/libs/lab-app-0.0.1.jar
 ```
+
+**조건 A 부하** (3분)
 ```bash
 cd C:/seolmin/backend-study/lab/k6
 k6 run -o experimental-prometheus-rw -e COND=A -e PROFILE=rehearsal timeout-amplification.js \
   | tee ../../vault/raw/$(date +%F)_exp-001_session_k6-timeoutA.txt
 ```
 
+**조건 B — 앱 재시작 (타임아웃 1초)**
 ```bash
-# 조건 B — 1초
 powershell.exe -NoProfile -Command "Get-NetTCPConnection -LocalPort 8080 -State Listen -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id \$_.OwningProcess -Force }"
 cd C:/seolmin/backend-study/lab/app
 java -Dspring.datasource.hikari.connection-timeout=1000 -jar build/libs/lab-app-0.0.1.jar
 ```
+
+**조건 B 부하** (3분)
 ```bash
 cd C:/seolmin/backend-study/lab/k6
 k6 run -o experimental-prometheus-rw -e COND=B -e PROFILE=rehearsal timeout-amplification.js \
   | tee ../../vault/raw/$(date +%F)_exp-001_session_k6-timeoutB.txt
 ```
 
-👉 가리킬 곳: `req_attempts` ÷ `iterations` = 증폭 배수. `user_total_wait` p95.
+👉 가리킬 곳: `req_attempts` ÷ `iterations` = **증폭 배수**. 그리고 `user_total_wait` p95.
 
 ❓ **"빨리 실패하는 쪽이 사용자를 더 오래 기다리게 할까, 덜 기다리게 할까?"**
+
+**A-1 원복 — 앱을 기본 설정으로**
+```bash
+powershell.exe -NoProfile -Command "Get-NetTCPConnection -LocalPort 8080 -State Listen -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id \$_.OwningProcess -Force }"
+cd C:/seolmin/backend-study/lab/app
+java -jar build/libs/lab-app-0.0.1.jar
+```
+→ `max=10.0` 확인. DB는 건드린 게 없으므로 SQL 원복 불필요.
 
 ---
 
@@ -405,25 +635,38 @@ k6 run -o experimental-prometheus-rw -e COND=B -e PROFILE=rehearsal timeout-ampl
 
 ### 오프셋 vs 커서 (15분)
 
-앱을 기본 설정으로 되돌리고:
-```bash
-powershell.exe -NoProfile -Command "Get-NetTCPConnection -LocalPort 8080 -State Listen -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id \$_.OwningProcess -Force }"
-cd C:/seolmin/backend-study/lab/app && java -jar build/libs/lab-app-0.0.1.jar
-```
+**비교 조건 — 가져오는 결과는 같다. 시작 위치를 찾는 방법만 다르다**
 
-단건부터:
+| | 오프셋 | 커서 |
+|---|---|---|
+| 하는 일 | 평점 목록 최신순, 490만 번째부터 10건 | 2024-10-01 이전 것 중 최신 10건 |
+| 방법 | 앞의 490만 행을 **세면서 버린다** | 시작 위치를 **바로 찾는다** |
+| 인덱스 | 없음 (1단계) → 있음 (2단계) | 없음 (1단계) → 있음 (2단계) ← 변수 |
+
+**단건 측정 — 오프셋**
 ```bash
 curl -s -o /dev/null -w "offset %{time_total}\n" "http://localhost:8080/lab/ratings?offset=4900000&limit=10"
+```
+→ 약 1.2~1.5초
+
+**단건 측정 — 커서**
+```bash
 curl -s -o /dev/null -w "cursor %{time_total}\n" "http://localhost:8080/lab/ratings?cursorUpdatedAt=2024-10-01T00:00:00Z&limit=10"
 ```
-→ 약 1.2~1.5초 / 약 0.11~0.16초
+→ 약 0.11~0.16초
+
 (`curl -w` 문자열에 한글을 넣으면 콘솔에서 깨진다. 영문으로 둔다)
 
-부하:
+**부하 — 오프셋** (4분)
 ```bash
 cd C:/seolmin/backend-study/lab/k6
 k6 run -o experimental-prometheus-rw -e MODE=offset -e PROFILE=rehearsal offset-vs-cursor.js \
   | tee ../../vault/raw/$(date +%F)_exp-001_session_k6-offset.txt
+```
+
+**부하 — 커서** (4분)
+```bash
+cd C:/seolmin/backend-study/lab/k6
 k6 run -o experimental-prometheus-rw -e MODE=cursor -e PROFILE=rehearsal offset-vs-cursor.js \
   | tee ../../vault/raw/$(date +%F)_exp-001_session_k6-cursor.txt
 ```
@@ -432,45 +675,76 @@ k6 run -o experimental-prometheus-rw -e MODE=cursor -e PROFILE=rehearsal offset-
 
 ❓ **"`updated_at`에 인덱스를 걸면 두 쿼리가 각각 어떻게 될까? 둘 다 빨라질까?"**
 
-**적고 나서** 실행:
+**적고 나서** 인덱스 생성 (약 10초)
 ```bash
 docker exec lab-postgres psql -U lab -d labdb -c "
 CREATE INDEX idx_user_rating__updated ON user_rating(updated_at DESC);
 ANALYZE user_rating;"
 ```
+
+**다시 재기 — 오프셋** (같은 명령, 인덱스만 생겼다)
 ```bash
 curl -s -o /dev/null -w "offset %{time_total}\n" "http://localhost:8080/lab/ratings?offset=4900000&limit=10"
+```
+→ 약 8.5초 — **느려졌다**
+
+**다시 재기 — 커서** (같은 명령)
+```bash
 curl -s -o /dev/null -w "cursor %{time_total}\n" "http://localhost:8080/lab/ratings?cursorUpdatedAt=2024-10-01T00:00:00Z&limit=10"
 ```
-→ 오프셋 약 8.5초(**느려짐**) / 커서 약 5.7ms(빨라짐)
+→ 약 5.7ms — 빨라졌다
 
+**왜 그런지 실행계획으로** — 오프셋 쿼리가 뭘 하는지 본다
 ```bash
 docker exec lab-postgres psql -U lab -d labdb -c "
 EXPLAIN ANALYZE SELECT user_id, movie_id, rating, updated_at FROM user_rating
 ORDER BY updated_at DESC LIMIT 10 OFFSET 4900000;"
 ```
-👉 가리킬 곳: `Index Scan`으로 바뀐 것
+👉 가리킬 곳: `Seq Scan` + 정렬이 아니라 **`Index Scan`으로 바뀌었다.**
+인덱스를 490만 건 걸어가면서 매 건 테이블을 찾아간다.
+
+| | 인덱스 없음 | 인덱스 있음 |
+|---|---|---|
+| 오프셋 | 약 1.2초 | **약 8.5초 (7배 나빠짐)** |
+| 커서 | 약 0.11초 | 약 5.7ms (20배 좋아짐) |
 
 ❓ **"인덱스를 걸었는데 왜 오프셋만 느려졌을까?"**
 
-**원복:**
+**A-2 ⑥ 원복 — 여기서 바로 한다**
 ```bash
-docker exec lab-postgres psql -U lab -d labdb -c "DROP INDEX idx_user_rating__updated; ANALYZE user_rating;"
+docker exec lab-postgres psql -U lab -d labdb -c "
+DROP INDEX IF EXISTS idx_user_rating__updated;
+ANALYZE user_rating;"
+docker exec lab-postgres psql -U lab -d labdb -c "\di"
 ```
+→ 5줄. `idx_user_rating__updated`가 없어야 한다.
 
 ### ⑦ 통계 미리 집계 — **리허설에서 먼저 확인할 것** ⚠
 
 아직 실측 안 했다. 리허설에서 차이가 나는지 보고, 안 나면 당일에 뺀다.
 
-before (10회씩 재서 평균 — 1회 측정은 노이즈에 묻힌다):
+**비교 조건**
+
+| | before | after |
+|---|---|---|
+| 하는 일 | 영화 하나의 평점 개수·평균 | 똑같음 |
+| 방법 | 조회할 때마다 `count(*)`로 **센다** | **미리 세둔 칼럼**을 읽는다 ← 변수 |
+| 대상 | 인기(60300, 10,339건) / 비인기(16710, 109건) | 똑같음 (고정) |
+
+**before — 인기 영화** (10회 평균. 1회로는 노이즈에 묻힌다)
 ```bash
 for i in $(seq 1 10); do curl -s -o /dev/null -w "popular %{time_total}\n" "http://localhost:8080/lab/movies/60300/stats"; done
-for i in $(seq 1 10); do curl -s -o /dev/null -w "rare    %{time_total}\n" "http://localhost:8080/lab/movies/16710/stats"; done
 ```
+
+**before — 비인기 영화**
+```bash
+for i in $(seq 1 10); do curl -s -o /dev/null -w "rare %{time_total}\n" "http://localhost:8080/lab/movies/16710/stats"; done
+```
+
 → 사전측정 2회가 서로 뒤집혔다: 1차 6.2ms / 12.9ms, 2차 18.8ms / 7.1ms.
 **둘 다 한 자릿수 ms라 노이즈에 묻힌다. 이대로면 실험이 안 된다.**
 
-after(미리 집계) 준비 — 앱에 엔드포인트가 아직 없다:
+**after 준비 — 집계 칼럼 만들고 채우기** (앱에 읽는 엔드포인트는 아직 없다)
 ```bash
 docker exec lab-postgres psql -U lab -d labdb -c "
 ALTER TABLE movies ADD COLUMN rating_count int DEFAULT 0;
@@ -480,7 +754,27 @@ FROM (SELECT movie_id, count(*) c, sum(rating) s FROM user_rating GROUP BY movie
 WHERE m.movie_id = s.movie_id;"
 ```
 
+**SQL로만 before/after 비교** (앱 엔드포인트가 없으므로)
+```bash
+docker exec lab-postgres psql -U lab -d labdb -c "
+EXPLAIN ANALYZE SELECT count(*), avg(rating) FROM user_rating WHERE movie_id = 60300;"
+```
+```bash
+docker exec lab-postgres psql -U lab -d labdb -c "
+EXPLAIN ANALYZE SELECT rating_count, rating_sum FROM movies WHERE movie_id = 60300;"
+```
+
 리허설 판정: 3배 이상이면 진행 / 1.5배 미만이면 당일에 뺀다.
+
+**A-2 ⑦ 원복**
+```bash
+cd C:/seolmin/backend-study/lab/sql
+docker exec -i lab-postgres psql -U lab -d labdb < 99_cleanup.sql
+docker exec -i lab-postgres psql -U lab -d labdb < 04_indexes.sql
+docker exec lab-postgres psql -U lab -d labdb -c "ANALYZE user_rating; ANALYZE movies;"
+docker exec lab-postgres psql -U lab -d labdb -c "\d movies"
+```
+→ `movies`에 `rating_count` / `rating_sum`이 없어야 한다.
 
 ---
 
