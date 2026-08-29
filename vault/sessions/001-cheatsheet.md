@@ -817,7 +817,7 @@ git log --oneline -1
 | EXPLAIN 시간이 앞 실행보다 몇 배 큼 | 앞 부하가 안 빠졌다. `SELECT count(*) FROM pg_stat_activity WHERE state='active';` 가 0인지 보고 재측정 |
 | `VACUUM` 실패 (shared memory) | DB 컨테이너 메모리 2g인지 확인 |
 | 인덱스가 이상하게 남음 | `lab/sql`에서 `99_cleanup.sql` → `04_indexes.sql` 순서로 |
-| B-2 전환점이 표와 딴판 | B-1 뒤 `VACUUM FULL user_rating;` 안 했다. `pg_relation_size`가 327MB인지 확인 |
+| B-2 전환점이 표와 딴판 | B-1 뒤 `VACUUM FULL user_rating;` 안 했다. `pg_relation_size`가 약 370MB인지 확인 (735MB면 안 된 것) |
 | 같은 쿼리인데 계획이 실행마다 바뀜 | autovacuum이 도는 중. `pg_stat_activity`에서 끝난 걸 보고 `ANALYZE` 후 재측정 |
 | `psql: /tmp/xxx.sql: No such file` | `-f /tmp/…` 말고 `docker exec -i … < 파일` 방식으로 |
 
