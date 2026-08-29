@@ -91,12 +91,12 @@ Index Scan → Bitmap Heap Scan → Seq Scan. 아래 쿼리와 실측 비율로 
 1~100이 헤비(5,000건/명)라 실제로는 15.31%밖에 안 된다).
 
 ```sql
+EXPLAIN ANALYZE SELECT * FROM user_rating WHERE user_id = 46401;                 -- 0.0003% (Index Scan)
 EXPLAIN ANALYZE SELECT * FROM user_rating WHERE user_id = 36;                    -- 0.10%
-EXPLAIN ANALYZE SELECT * FROM user_rating WHERE user_id BETWEEN 1 AND 10;        -- 0.99%
 EXPLAIN ANALYZE SELECT * FROM user_rating WHERE user_id BETWEEN 1 AND 100;       -- 9.94%
-EXPLAIN ANALYZE SELECT * FROM user_rating WHERE user_id BETWEEN 1 AND 1100;      -- 15.90% (전환 직전)
-EXPLAIN ANALYZE SELECT * FROM user_rating WHERE user_id BETWEEN 1 AND 1150;      -- 16.20% (전환 직후)
-EXPLAIN ANALYZE SELECT * FROM user_rating WHERE user_id BETWEEN 1 AND 2000;      -- 21.27%
+EXPLAIN ANALYZE SELECT * FROM user_rating WHERE user_id BETWEEN 1 AND 4000;      -- 33.20% (전환 직전)
+EXPLAIN ANALYZE SELECT * FROM user_rating WHERE user_id BETWEEN 1 AND 4500;      -- 36.18% (전환 직후)
+EXPLAIN ANALYZE SELECT * FROM user_rating WHERE user_id BETWEEN 1 AND 5000;      -- 39.17%
 ```
 
 `SELECT movie_id, rating`이 아니라 `SELECT *`로 검증했다 — 이 쿼리는 어차피
@@ -105,17 +105,52 @@ EXPLAIN ANALYZE SELECT * FROM user_rating WHERE user_id BETWEEN 1 AND 2000;     
 
 **실측 결과 (user_rating 5,030,000건 기준):**
 
-| 비율 | 쿼리 | 스캔 방식 | 실제 rows | 추정 rows | Execution Time |
-|---|---|---|---|---|---|
-| 0.10% | `= 36` | Index Scan | 5,000 | 4,844 | 16.7ms |
-| 0.99% | `BETWEEN 1 AND 10` | Index Scan | 50,000 | 54,622 | 29.1ms |
-| 9.94% | `BETWEEN 1 AND 100` | Bitmap Heap Scan | 500,000 | 534,798 | 431.5ms |
-| 15.90% | `BETWEEN 1 AND 1100` | Bitmap Heap Scan | 800,000 | 823,351 | — |
-| **16.20%** | `BETWEEN 1 AND 1150` | **Seq Scan** | 815,000 | 837,033 | 240.5ms |
-| 21.27% | `BETWEEN 1 AND 2000` | Seq Scan | 1,070,000 | 1,090,199 | 617.3ms |
+| 비율 | 쿼리 | 스캔 방식 | 실제 rows |
+|---|---|---|---|
+| 0.0003% | `= 46401` (라이트 유저) | **Index Scan** | 17 |
+| 0.10% | `= 36` (헤비 유저) | Bitmap Heap Scan | 5,000 |
+| 0.99% | `BETWEEN 1 AND 10` | Bitmap Heap Scan | 50,000 |
+| 9.94% | `BETWEEN 1 AND 100` | Bitmap Heap Scan | 500,000 |
+| 27.24% | `BETWEEN 1 AND 3000` | Bitmap Heap Scan | 1,370,000 |
+| 33.20% | `BETWEEN 1 AND 4000` | Bitmap Heap Scan | 1,670,000 |
+| **36.18%** | `BETWEEN 1 AND 4500` | **Seq Scan** | 1,820,000 |
+| 39.17% | `BETWEEN 1 AND 5000` | Seq Scan | 1,970,000 |
 
-**전환점: 전체의 약 16%.** (`vault/raw/2026-08-28_pilot_b2_ratio_rehearsal.txt`에 전문 있음.
-1150 이후 5,000/10,000/20,000/50,000까지도 전부 Seq Scan을 재확인함)
+`Index Scan`은 라이트 유저(17행)에서만 나온다. 2026-08-29에는 헤비 유저(5,000행)도
+`Index Scan`이었는데 `VACUUM FULL` 후 `Bitmap Heap Scan`으로 바뀌었다 —
+테이블을 다시 쓰면서 한 유저의 행이 연속 페이지에 모인 영향으로 보인다(#가설).
+
+**전환점: 전체의 약 33~36%** (깨끗한 테이블 기준, 2026-08-30 재측정).
+
+### ⚠ 전환점은 고정된 숫자가 아니다 — 2026-08-30에 세 번 다르게 나왔다
+
+같은 데이터, 같은 인덱스, 같은 쿼리인데 **테이블 물리 상태에 따라 전환점이 3배 넘게 움직인다.**
+
+| 상태 | 테이블 | 페이지 | 전환점 |
+|---|---|---|---|
+| 2026-08-28 최초 측정 (부분 부풀림) | 미기록 | 미기록 | 15.9~16.2% |
+| **B-1 직후** (부풀림 + `movie_id_str` 있음) | 735 MB | 94,019 | **10.5~10.8%** |
+| **VACUUM FULL 후** (깨끗) | 327 MB | 41,917 | **33.2~36.2%** |
+
+원인은 **B-1이 테이블을 2배로 부풀린다**는 것이다.
+`UPDATE user_rating SET movie_id_str = movie_id::text` 가 5,030,000행을 전부
+다시 쓰면서 원본이 죽은 튜플로 남는다. 일반 `VACUUM`은 재사용 표시만 하고
+파일을 안 줄인다. **`VACUUM FULL`이라야 회수된다**(5.6초).
+
+부풀면 같은 행 수가 더 많은 페이지에 흩어진다. 인덱스 스캔은 찾은 행마다
+힙 페이지를 찾아가므로 흩어질수록 비싸지고, 그래서 옵티마이저가 **더 낮은
+비율에서 인덱스를 포기한다.** (#가설 — 비용 모델을 직접 뜯어보진 않았다)
+
+**진행 순서상 반드시 지킬 것:** B-1 다음에 B-2를 하므로,
+B-1이 끝나면 `99_cleanup.sql` → **`VACUUM FULL user_rating;`** → `04_indexes.sql`
+→ `ANALYZE` 를 거쳐야 위 33~36% 숫자가 재현된다.
+`99_cleanup.sql`만으로는 부족하다.
+
+**그리고 이 현상 자체가 좋은 소재다.** "16%"를 외우게 하면 안 된다.
+같은 DB에서 어제 16%, 오늘 10%, 청소하니 36%가 나왔다 —
+**전환점은 데이터 양이 아니라 테이블이 디스크에 어떻게 놓여 있느냐가 정한다.**
+
+전문: `vault/raw/2026-08-30_b2_transition_shift_rehearsal.txt`
 
 **볼 것:**
 - Index Scan → Bitmap Heap Scan → Seq Scan, 3단계 전환이 실제로 보이는가

@@ -10,6 +10,8 @@ tags: [cheatsheet]
 
 **설명 없음. 명령어와 질문만.** "왜"가 필요하면 [[001-plan]]을 연다.
 
+> **시작 전 5분: [[001-overview]] 를 팀원과 함께 본다.**
+
 한 대에서 진행한다. 총 2시간 30분.
 
 > 오늘 답하는 질문: **"느리다"고 할 때, 어디가 느린지 어떻게 찾는가**
@@ -132,7 +134,7 @@ docker exec -i lab-postgres psql -U lab -d labdb < 00_find_test_ids.sql
 
 > 네 개 다 같은 얘기다 — **인덱스가 있어도 안 먹는 경우들.**
 
-### B-1 타입 다른 칼럼 조인 (5분)
+### B-1 타입 다른 칼럼 조인 (5분) · 3장 「타입이 다른 칼럼 조인 주의」
 
 > 보여주는 것: **타입이 안 맞으면** 인덱스가 무용지물이 된다
 
@@ -158,26 +160,54 @@ WHERE m.movie_id = 60300;"
 
 ❓ **"인덱스가 분명히 있는데 왜 아래는 안 탔을까?"**
 
-### B-2 선택도 전환점 (5분)
+> ### ⚠ B-2로 넘어가기 전에 반드시 — 안 하면 B-2 결과가 달라진다
+>
+> B-1의 `UPDATE 5030000`이 테이블을 **735MB로 2배 부풀린다.**
+> 컬럼만 지우면 안 되고 `VACUUM FULL`까지 해야 327MB로 돌아온다.
+> 안 하면 B-2 전환점이 36% → 10%로 바뀐다. (2026-08-30에 실제로 겪음)
+
+```bash
+cd C:/seolmin/backend-study/lab/sql
+docker exec -i lab-postgres psql -U lab -d labdb < 99_cleanup.sql
+docker exec lab-postgres psql -U lab -d labdb -c "VACUUM FULL user_rating;"
+docker exec -i lab-postgres psql -U lab -d labdb < 04_indexes.sql
+docker exec lab-postgres psql -U lab -d labdb -c "ANALYZE user_rating;"
+docker exec lab-postgres psql -U lab -d labdb -c "
+SELECT pg_size_pretty(pg_relation_size('user_rating'));"
+```
+→ **327 MB** 나오면 정상. 735MB면 `VACUUM FULL`이 안 된 것. (약 6초 걸린다)
+
+### B-2 선택도 전환점 (5분) · 3장 「선택도를 고려한 인덱스 칼럼 선택」
 
 > 보여주는 것: **너무 많이 읽으면** DB가 인덱스를 스스로 포기한다
 
 ```bash
 docker exec lab-postgres psql -U lab -d labdb -c "
+EXPLAIN ANALYZE SELECT * FROM user_rating WHERE user_id = 46401;"
+docker exec lab-postgres psql -U lab -d labdb -c "
 EXPLAIN ANALYZE SELECT * FROM user_rating WHERE user_id = 36;"
 docker exec lab-postgres psql -U lab -d labdb -c "
-EXPLAIN ANALYZE SELECT * FROM user_rating WHERE user_id BETWEEN 1 AND 100;"
+EXPLAIN ANALYZE SELECT * FROM user_rating WHERE user_id BETWEEN 1 AND 4000;"
 docker exec lab-postgres psql -U lab -d labdb -c "
-EXPLAIN ANALYZE SELECT * FROM user_rating WHERE user_id BETWEEN 1 AND 1100;"
-docker exec lab-postgres psql -U lab -d labdb -c "
-EXPLAIN ANALYZE SELECT * FROM user_rating WHERE user_id BETWEEN 1 AND 1150;"
+EXPLAIN ANALYZE SELECT * FROM user_rating WHERE user_id BETWEEN 1 AND 4500;"
 ```
 
-👉 가리킬 곳: `Index Scan` → `Bitmap Heap Scan` → (1100) `Bitmap` → (1150) `Seq Scan`
+👉 가리킬 곳: 스캔 방식이 3단계로 갈린다
 
-❓ **"1100에서 1150으로 50명 늘렸을 뿐인데 왜 계획이 통째로 바뀌지?"**
+| 쿼리 | 행수 | 비율 | 스캔 방식 |
+|---|---|---|---|
+| `= 46401` (라이트) | 17 | 0.0003% | **Index Scan** |
+| `= 36` (헤비) | 5,000 | 0.10% | **Bitmap Heap Scan** |
+| `BETWEEN 1 AND 4000` | 1,670,000 | 33.2% | Bitmap Heap Scan |
+| `BETWEEN 1 AND 4500` | 1,820,000 | 36.2% | **Seq Scan** |
 
-### B-3 커버링 인덱스 (5분)
+❓ **"4000에서 4500으로 늘렸을 뿐인데 왜 계획이 통째로 바뀌지?"**
+
+> **전환점 숫자를 외우게 하지 말 것.** 같은 DB에서 어제 16%, B-1 직후 10%,
+> 청소 후 36%가 나왔다. **데이터 양이 아니라 테이블이 디스크에 어떻게
+> 놓여 있느냐가 정한다.** 시간 남으면 이걸 그대로 보여줘도 좋다.
+
+### B-3 커버링 인덱스 (5분) · 3장 「커버링 인덱스 활용하기」
 
 > 보여주는 것: **컬럼 하나 더 요구하면** 테이블을 읽으러 간다
 
@@ -192,7 +222,7 @@ EXPLAIN ANALYZE SELECT movie_id, rating, updated_at FROM user_rating WHERE movie
 
 ❓ **"칼럼 하나 더 달라고 했을 뿐인데 왜 테이블을 읽으러 갈까?"**
 
-### B-4 복합 인덱스 컬럼 순서 (5분)
+### B-4 복합 인덱스 컬럼 순서 (5분) · 3장 「단일 인덱스와 복합 인덱스」
 
 > 보여주는 것: **컬럼 순서**가 중요한데, 쿼리 모양에 따라 안 중요할 수도 있다
 
@@ -221,17 +251,21 @@ ANALYZE user_rating;"
 cd C:/seolmin/backend-study/lab/sql
 docker exec -i lab-postgres psql -U lab -d labdb < 99_cleanup.sql
 docker exec -i lab-postgres psql -U lab -d labdb < 04_indexes.sql
+docker exec lab-postgres psql -U lab -d labdb -c "ANALYZE user_rating;"
 docker exec lab-postgres psql -U lab -d labdb -c "\di"
 ```
 → 다시 5줄(기본키 3 + 베이스라인 2)로 돌아왔는지 확인
+(B-1 직후에 이미 `VACUUM FULL`을 했으면 여기선 안 해도 된다)
 
 > 묶으면: 인덱스 걸었다고 끝이 아니다. 쿼리가 어떻게 생겼냐에 따라 달라진다.
 
 ---
 
-> **여기까지는 쿼리 하나씩 봤다. 이제 부하를 걸어서 서버 전체를 본다.**
+> **여기까지 3장이었다. 이제 2장으로 간다. 부하를 걸어서 서버 전체를 본다.**
 
 ## A-1 관찰 (25분)
+
+**2장 「처리량」「병목 지점」「커넥션 풀 크기」「커넥션 대기 시간」 + 3장 「쿼리 타임아웃」**
 
 > 보여주는 것: **공식은 상한선일 뿐이고, 진짜 병목은 화면에서 찾아야 한다.**
 > 흐름: 부하 → 처리량 안 오름 → 계산해보니 14배 차이 → 뭐가 빠졌지 →
@@ -359,9 +393,11 @@ k6 run -o experimental-prometheus-rw -e COND=B -e PROFILE=rehearsal timeout-ampl
 
 ---
 
-> **여기까지는 병목을 찾았다. 이제 고쳐본다.**
+> **다시 3장이다. 병목을 찾았으니 고쳐본다.**
 
 ## A-2 (25분)
+
+**3장 「페이지 기준 목록 조회 대신 ID 기준 목록 조회」**
 
 > 보여주는 것: **같은 인덱스가 한쪽은 빠르게, 한쪽은 느리게 만든다.**
 > 흐름: 오프셋 느림 → "인덱스 걸면 되겠네" → 걸었더니 더 느려짐 → 왜? → 커서로 교체
@@ -487,6 +523,8 @@ git log --oneline -1
 | EXPLAIN 시간이 앞 실행보다 몇 배 큼 | 앞 부하가 안 빠졌다. `SELECT count(*) FROM pg_stat_activity WHERE state='active';` 가 0인지 보고 재측정 |
 | `VACUUM` 실패 (shared memory) | DB 컨테이너 메모리 2g인지 확인 |
 | 인덱스가 이상하게 남음 | `lab/sql`에서 `99_cleanup.sql` → `04_indexes.sql` 순서로 |
+| B-2 전환점이 표와 딴판 | B-1 뒤 `VACUUM FULL user_rating;` 안 했다. `pg_relation_size`가 327MB인지 확인 |
+| 같은 쿼리인데 계획이 실행마다 바뀜 | autovacuum이 도는 중. `pg_stat_activity`에서 끝난 걸 보고 `ANALYZE` 후 재측정 |
 | `psql: /tmp/xxx.sql: No such file` | `-f /tmp/…` 말고 `docker exec -i … < 파일` 방식으로 |
 
 ---

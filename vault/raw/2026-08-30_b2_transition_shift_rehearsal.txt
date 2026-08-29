@@ -1,0 +1,166 @@
+B-2 전환점 재측정 — 2026-08-30, 리허설(한 대)
+계기: B-1을 돌린 뒤 B-2를 하니 전환점이 16.2%(2026-08-28 측정)가 아니었다.
+조건: PostgreSQL 16 (cpus:2, mem 2g), user_rating 5,030,000
+     인덱스: idx_user_rating__movie_rating, idx_user_rating__user_updated
+     직전 커밋: 01eaed0
+
+================================================================
+0. 측정 중 발견한 오염 요인 두 가지 (먼저 기록)
+================================================================
+
+--- (1) autovacuum이 돌면 같은 쿼리 계획이 실행마다 뒤집힌다 ---
+
+B-1 직후 측정을 시작했더니 N=100(약 10%)이 실행할 때마다 달랐다.
+
+  1차 시도: N=100 -> Seq Scan
+  2차 시도: N=100 -> Bitmap Heap Scan
+  3차 시도: N=200 -> Bitmap, 직후 다시 N=200 -> Seq Scan
+
+원인:
+$ SELECT pid, state, query FROM pg_stat_activity WHERE query ILIKE '%vacuum%';
+ 2934 | active | autovacuum: VACUUM ANALYZE public.user_rating
+
+B-1의 UPDATE 5030000 이 죽은 튜플 500만 개를 만들었고 autovacuum이 뒤따라
+돌면서 통계가 계속 갱신됐다. 경계 근처라 통계가 조금만 바뀌어도 계획이 뒤집힌다.
+-> autovacuum이 끝난 뒤(pg_stat_activity가 비고) ANALYZE 한 번 하고 재측정함.
+
+--- (2) DROP COLUMN 은 컬럼을 실제로 지우지 않는다 ---
+
+$ SELECT attname, attnum, attisdropped FROM pg_attribute
+  WHERE attrelid='user_rating'::regclass AND attnum > 0;
+
+ user_id                      | 1 | f
+ movie_id                     | 2 | f
+ rating                       | 3 | f
+ created_at                   | 4 | f
+ updated_at                   | 5 | f
+ ........pg.dropped.6........ | 6 | t
+ ........pg.dropped.7........ | 7 | t
+ movie_id_str                 | 8 | f
+
+지운 컬럼은 `........pg.dropped.N........` 로 자리만 남는다(6, 7번).
+그리고 99_cleanup.sql 을 돌린 뒤에도 물리 크기는 줄지 않는다.
+
+================================================================
+1. 물리 크기 — B-1이 테이블을 2배로 부풀린다
+================================================================
+
+B-1 직후 (99_cleanup.sql 로 컬럼을 지운 뒤에도):
+  pg_relation_size  735 MB
+  relpages          94,019
+
+VACUUM FULL user_rating; 실행 (5.63초):
+  pg_relation_size  327 MB
+  relpages          41,917
+
+원인: B-1의 `UPDATE user_rating SET movie_id_str = movie_id::text` 가
+5,030,000행을 전부 새로 쓴다. 원본 행은 죽은 튜플로 남는다.
+일반 VACUUM은 그 공간을 "재사용 가능"으로 표시할 뿐 파일을 줄이지 않는다.
+VACUUM FULL 이 테이블을 통째로 다시 써야 회수된다.
+
+SELECT * 의 width:
+  movie_id_str 있을 때  39
+  없을 때(명시 컬럼)    34
+
+================================================================
+2. 상태 A — B-1 직후 (735 MB, movie_id_str 있음)
+================================================================
+
+ANALYZE 후, 한 psql 세션에서 연속 실행.
+
+$ EXPLAIN SELECT * FROM user_rating WHERE user_id BETWEEN 1 AND N;
+
+  N=100   ->  Bitmap Heap Scan
+  N=150   ->  Bitmap Heap Scan
+  N=200   ->  Bitmap Heap Scan
+  N=250   ->  Seq Scan
+  N=300   ->  Seq Scan
+  N=500   ->  Seq Scan
+
+행수와 비율:
+  N=100   500,000행    9.94%
+  N=200   530,000행   10.54%   <- 마지막 Bitmap
+  N=250   545,000행   10.83%   <- 첫 Seq Scan
+  N=300   560,000행   11.13%
+
+전환점: 약 10.5% ~ 10.8%
+
+================================================================
+3. 상태 B — 깨끗한 베이스라인 (327 MB, VACUUM FULL 후)
+================================================================
+
+$ 99_cleanup.sql; VACUUM FULL user_rating; 04_indexes.sql; ANALYZE user_rating;
+
+  N=100    ->  Bitmap Heap Scan
+  N=500    ->  Bitmap Heap Scan
+  N=800    ->  Bitmap Heap Scan
+  N=1000   ->  Bitmap Heap Scan
+  N=1100   ->  Bitmap Heap Scan
+  N=1150   ->  Bitmap Heap Scan
+  N=1300   ->  Bitmap Heap Scan
+  N=1500   ->  Bitmap Heap Scan
+  N=2000   ->  Bitmap Heap Scan
+  N=3000   ->  Bitmap Heap Scan
+  N=3200   ->  Bitmap Heap Scan
+  N=3500   ->  Bitmap Heap Scan
+  N=3800   ->  Bitmap Heap Scan
+  N=4000   ->  Bitmap Heap Scan
+  N=4500   ->  Seq Scan
+  N=5000   ->  Seq Scan
+  N=8000   ->  Seq Scan
+  N=10000  ->  Seq Scan
+
+행수와 비율:
+  N=3000   1,370,000행   27.24%
+  N=4000   1,670,000행   33.20%   <- 마지막 Bitmap
+  N=4500   1,820,000행   36.18%   <- 첫 Seq Scan
+  N=5000   1,970,000행   39.17%
+
+전환점: 약 33% ~ 36%
+
+================================================================
+4. 요약 — 같은 데이터, 같은 인덱스인데 전환점이 3배 넘게 다르다
+================================================================
+
+| 상태 | 테이블 크기 | 페이지 수 | 전환점 |
+|---|---|---|---|
+| 2026-08-28 최초 측정 (부분 부풀림) | 미기록 | 미기록 | 15.9% ~ 16.2% |
+| 상태 A: B-1 직후 (부풀림 + 컬럼 있음) | 735 MB | 94,019 | 10.5% ~ 10.8% |
+| 상태 B: VACUUM FULL 후 | 327 MB | 41,917 | 33.2% ~ 36.2% |
+
+행 건수도, 인덱스도, 쿼리도 똑같다. 바뀐 것은 테이블의 물리 상태뿐이다.
+
+해석(가설, 비용 모델 직접 확인 안 함): 테이블이 부풀면 같은 행 수가 더 많은
+페이지에 흩어진다. 인덱스 스캔은 찾은 행마다 힙 페이지를 찾아가므로
+페이지가 흩어질수록 비싸진다. 순차 스캔도 비싸지지만 상대적으로 덜 손해라,
+옵티마이저가 더 낮은 비율에서 인덱스를 포기한다.
+
+실습에 주는 함의:
+- B-2를 하기 전에 B-1의 흔적(부풀림)을 반드시 걷어내야 한다.
+  99_cleanup.sql 만으로는 부족하고 VACUUM FULL 이 필요하다(5.6초).
+- 또는 B-2를 B-1보다 먼저 한다.
+- 전환점 숫자 자체를 외우게 하면 안 된다. 환경에 따라 10%도 되고 36%도 된다.
+
+================================================================
+5. 추가 — VACUUM FULL 후에는 Index Scan이 나오는 지점도 달라졌다
+================================================================
+
+깨끗한 상태(327 MB)에서 낮은 비율 쪽을 다시 확인.
+
+$ EXPLAIN SELECT * FROM user_rating WHERE ...
+
+  user_id = 46401         17행       0.000%  Index Scan using idx_user_rating__user_updated
+  user_id = 36          5,000행      0.099%  Bitmap Heap Scan
+  user_id BETWEEN 1 AND 5   25,000행 0.497%  Bitmap Heap Scan
+  user_id BETWEEN 1 AND 10  50,000행 0.994%  Bitmap Heap Scan
+
+2026-08-29 측정에서는 user_id=36(헤비)이 Index Scan이었는데
+VACUUM FULL 후에는 Bitmap Heap Scan으로 바뀌었다.
+
+VACUUM FULL이 테이블을 물리적으로 다시 쓰면서 행 배치가 달라진 영향으로 보인다
+(#가설). 시딩이 user_id 순서로 INSERT했으므로 다시 쓰면 한 유저의 행이
+연속된 페이지에 모이고, 그러면 비트맵 스캔이 유리해진다.
+
+실습에 주는 함의: 3단계 대비를 보여주려면 라이트 유저(46401, 17행)를 써야
+Index Scan이 나온다. 헤비 유저(36)는 이제 Bitmap 쪽이다.
+-> 001-cheatsheet.md 의 B-2 명령을 46401 / 36 / 4000 / 4500 네 개로 교체함.
