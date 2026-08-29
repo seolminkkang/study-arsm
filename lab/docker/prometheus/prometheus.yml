@@ -1,0 +1,38 @@
+# 스크레이프 간격을 5초로 줄인다. 기본 15초로는 A-1 ④에서
+# 풀 크기를 바꾼 직후의 변화가 서너 점밖에 안 찍혀서 그래프가 안 읽힌다.
+global:
+  scrape_interval: 5s
+  evaluation_interval: 5s
+
+scrape_configs:
+  # 스프링 앱. 앱은 컨테이너가 아니라 호스트에서 돈다(./gradlew bootRun).
+  - job_name: lab-app
+    metrics_path: /actuator/prometheus
+    static_configs:
+      # ┌──────────────────────────────────────────────────────────────┐
+      # │ 당일 두 대로 나눌 때 고쳐야 하는 유일한 줄.                  │
+      # │ 노트북 B(k6·prometheus·grafana)에서 노트북 A(앱)를 긁으므로  │
+      # │ host.docker.internal 을 A의 IP로 바꾼다. 예: 192.168.0.12    │
+      # │                                                              │
+      # │ Prometheus 설정 파일은 환경변수 치환을 지원하지 않는다.      │
+      # │ ${APP_TARGET} 같은 걸 써도 문자 그대로 들어가서 실패한다.    │
+      # │ 그래서 변수가 아니라 직접 편집이다.                          │
+      # └──────────────────────────────────────────────────────────────┘
+      - targets: ["host.docker.internal:8080"]
+        # namespace / application 라벨을 여기서 붙인다.
+        #
+        # Grafana 대시보드 20729가 이 두 라벨로 변수를 만든다
+        #   label_values(jdbc_connections_max, namespace)
+        # 스프링 부트는 이 라벨을 안 붙이므로(쿠버네티스 환경을 가정한 대시보드),
+        # 이걸 빼면 20729의 변수가 전부 비어서 모든 패널이 No data가 된다.
+        # 2026-08-29 확인.
+        labels:
+          namespace: lab
+          application: lab-app
+
+  # 컨테이너 CPU. A-1 ④에서 "풀을 키웠는데 왜 안 빨라지지?"의 답이
+  # DB CPU 포화인지 확인하려면 이게 있어야 한다.
+  # cAdvisor가 Docker Desktop에서 안 되는 이유는 docker-compose.yml 주석 참고.
+  - job_name: docker-stats
+    static_configs:
+      - targets: ["docker-stats-exporter:9487"]

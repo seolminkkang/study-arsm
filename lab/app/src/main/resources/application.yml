@@ -50,3 +50,17 @@ management:
   endpoint:
     health:
       show-details: always
+  metrics:
+    distribution:
+      # 히스토그램 버킷을 켜야 Prometheus에서 histogram_quantile로 p95를 뽑을 수 있다.
+      # 안 켜면 http_server_requests_seconds_bucket 시리즈가 아예 없어서
+      # Grafana 패널이 No data가 된다.
+      #
+      # 이게 있어야 lab/README.md ⑥의
+      #   "http_server_requests_seconds — k6가 본 시간과의 차이가 곧 큐 대기 시간"
+      # 을 한 화면에서 비교할 수 있다. 서버가 잰 시간과 k6가 잰 시간의
+      # 차이가 곧 요청이 큐에서 기다린 시간이다.
+      percentiles-histogram:
+        http.server.requests: true
+      slo:
+        http.server.requests: 5ms,10ms,25ms,50ms,100ms,250ms,500ms,1s,2s,5s

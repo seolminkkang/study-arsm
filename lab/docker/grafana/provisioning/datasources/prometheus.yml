@@ -1,0 +1,13 @@
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    # uid를 고정한다. 대시보드 JSON이 이 값을 참조하므로
+    # 자동 생성에 맡기면 임포트한 대시보드가 데이터소스를 못 찾는다.
+    uid: lab-prometheus
+    jsonData:
+      timeInterval: 5s

@@ -17,5 +17,65 @@ services:
           cpus: "2"
           memory: 2g
 
+  prometheus:
+    image: prom/prometheus:v3.1.0
+    container_name: lab-prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      # k6가 remote write로 결과를 밀어넣는다(lab/README.md ⑥·⑦).
+      # 이 플래그가 없으면 /api/v1/write가 404로 떨어진다.
+      - --web.enable-remote-write-receiver
+      # 부하 시나리오 1회가 5분이라 보존기간은 짧아도 된다.
+      - --storage.tsdb.retention.time=7d
+    ports:
+      - "${PROMETHEUS_PORT:-9090}:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - lab_promdata:/prometheus
+    extra_hosts:
+      # 리눅스에서도 host.docker.internal이 호스트를 가리키게 한다.
+      # (Docker Desktop은 기본 제공하지만 리눅스는 아니다)
+      - "host.docker.internal:host-gateway"
+
+  grafana:
+    image: grafana/grafana:11.5.1
+    container_name: lab-grafana
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: lab
+      # 로그인 없이 바로 보이게 한다. 회차 당일 화면 띄우는 시간을 아낀다.
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+    ports:
+      - "${GRAFANA_PORT:-3000}:3000"
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - lab_grafanadata:/var/lib/grafana
+    depends_on:
+      - prometheus
+
+  # 컨테이너별 CPU. DB 컨테이너 CPU 사용률을 보려고 띄운다.
+  #
+  # 원래 cAdvisor를 쓰려 했으나 Docker Desktop에서는 컨테이너별 CPU가
+  # 아예 안 나온다(2026-08-29 확인). 이유 두 가지:
+  #   1. Docker Desktop이 컨테이너마다 cgroup 네임스페이스를 격리해서
+  #      (docker info의 cgroupns) 컨테이너 안의 cAdvisor가 형제 컨테이너의
+  #      cgroup을 볼 수 없다. --cgroupns=host 로도 /docker/<id> 가 안 보인다.
+  #   2. 스토리지 드라이버가 overlay2가 아니라 overlayfs라
+  #      "failed to identify the read-write layer ID" 로 컨테이너 등록이 실패한다.
+  # cgroup을 직접 읽지 않고 Docker API로 stats를 받아오는 쪽으로 바꿨다.
+  # docker stats 명령이 동작하는 것과 같은 경로라 확실히 나온다.
+  #
+  # 태그가 latest뿐이라 다이제스트로 고정한다. 재현성을 위해서다.
+  # docker.sock을 읽기 전용으로 물린다 — 로컬 실습 환경에서만 쓴다.
+  docker-stats-exporter:
+    image: wywywywy/docker_stats_exporter@sha256:1e56d63987bbb10fc78ccca97a388e14696e305f52738a1f063e54f04cea779b
+    container_name: lab-docker-stats-exporter
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+
 volumes:
   lab_pgdata:
+  lab_promdata:
+  lab_grafanadata:
