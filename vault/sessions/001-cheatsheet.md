@@ -44,7 +44,13 @@ SELECT last_vacuum, last_analyze FROM pg_stat_user_tables WHERE relname='user_ra
 ```bash
 docker exec lab-postgres psql -U lab -d labdb -c "\di"
 ```
-→ `idx_user_rating__movie_rating` `idx_user_rating__user_updated` 2개만. 더 있으면:
+→ **5줄이 정상.** `genres_pkey` `movies_pkey` `movie_genres_pkey`(기본키, 항상 있음)
+\+ `idx_user_rating__movie_rating` `idx_user_rating__user_updated`(베이스라인)
+
+개수가 아니라 **없어야 할 게 섞였나**를 본다. 아래 셋이 보이면 원복 안 된 것:
+`idx_rating_movie_str`(B-1) · `idx_test_reversed`(B-4) · `idx_user_rating__updated`(A-2)
+
+섞여 있으면:
 ```bash
 cd C:/seolmin/backend-study/lab/sql
 docker exec -i lab-postgres psql -U lab -d labdb < 99_cleanup.sql
@@ -170,7 +176,7 @@ docker exec -i lab-postgres psql -U lab -d labdb < 99_cleanup.sql
 docker exec -i lab-postgres psql -U lab -d labdb < 04_indexes.sql
 docker exec lab-postgres psql -U lab -d labdb -c "\di"
 ```
-→ 인덱스 2개로 돌아왔는지 확인
+→ 다시 5줄(기본키 3 + 베이스라인 2)로 돌아왔는지 확인
 
 ---
 
