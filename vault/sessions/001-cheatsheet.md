@@ -68,7 +68,19 @@ curl -s http://localhost:8080/actuator/prometheus | grep hikaricp_connections_ma
 → JSON 나오고 `max=10.0`
 
 Grafana: http://localhost:3000 → `lab` 폴더 → **A-1 한 화면**
-→ 4패널 중 3번(pending)·4번(DB CPU)에 선이 그려지면 정상
+
+→ **3번 패널에 `max`·`idle` 선이 10에 그려져 있으면 정상.**
+   `pending`·`active`는 0, 4번(DB CPU)도 0이라 바닥에 눌려 안 보이는 게 맞다.
+   **유휴 상태에서 3·4번이 평평한 게 정상이다.** 부하를 걸어야 움직인다.
+
+→ 1번 패널은 위 `curl`을 칠 때마다 잠깐 솟았다 내려온다. 그것도 정상.
+
+값이 진짜 안 들어오는지 의심되면 Grafana 말고 여기서 확인:
+```bash
+curl -s -G http://localhost:9090/api/v1/query --data-urlencode 'query=hikaricp_connections_max'
+curl -s -G http://localhost:9090/api/v1/query --data-urlencode 'query=dockerstats_cpu_usage_ratio{name="lab-postgres"}'
+```
+→ `"value":[...,"10"]` / `"value":[...,"0"]` 처럼 나오면 들어오고 있는 것
 
 ### 합의하고 시작 (2분)
 
