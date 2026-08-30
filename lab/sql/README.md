@@ -5,14 +5,51 @@
 | 파일 | 역할 |
 |---|---|
 | `01_schema.sql` | 테이블 4개 생성 (overview, movie_vector 제외) |
-| `02_load_movies.sh` | 원본 덤프에서 칼럼만 뽑아 영화 데이터 로드 (awk 추출 필요해서 `.sql`이 아니라 `.sh`) |
+| `02_load_movies.sh` | 영화 데이터 로드. `MOHA_DUMP_DIR`가 기본, 없으면 `dump-lite/*.csv` (awk 추출 필요해서 `.sql`이 아니라 `.sh`) |
 | `03_seed_ratings.sql` | user_rating 500만 건, 양쪽 치우친 분포 |
 | `04_indexes.sql` | 인덱스 생성/삭제 (실험 중 걸었다 뺐다) |
 | `00_find_test_ids.sql` | 시딩 후 헤비/라이트 유저, 인기 영화 ID 조회 (B급 쿼리 자리표시자 채우는 용도) |
 | `99_cleanup.sql` | 실험용으로 덧붙인 칼럼/인덱스 원복 |
 | `explain/` | B급 실험용 쿼리 모음 (`vault/sessions/001-plan.md` B-1~B-4) |
+| `dump-lite/` | 영화 데이터 CSV 3개. **gitignore.** 각자 만들어 넣는 자리다 |
+| `dump/` | 원본 덤프에서 awk로 뽑은 중간 산출물. gitignore |
 
-원본 덤프(`dump/`)는 gitignore. 스크립트만 커밋한다.
+## 영화 데이터는 저장소에 없다
+
+`dump/`도 `dump-lite/`도 gitignore 대상이다. 영화 메타데이터는 TMDB에서
+온 것이라 약관상 6개월을 넘겨 캐시하거나 데이터셋으로 재배포할 수 없다.
+저장소 커밋은 영구 보관이므로 이 조항에 걸린다.
+
+**`dump-lite/`는 각자 만들어 넣는 자리다.** 파일이 있으면
+`02_load_movies.sh`가 그 경로로 적재한다.
+
+```bash
+MOHA_DUMP_DIR="<원본>/exec/sql_dump" ./02_load_movies.sh   # 기본 경로
+./02_load_movies.sh                                       # dump-lite/*.csv 가 있을 때
+```
+
+`MOHA_DUMP_DIR`를 주면 awk로 칼럼을 뽑아 `dump/*.tsv`를 만들고, 그걸 적재한 뒤
+**적재 결과를 다시 `dump-lite/*.csv`로 쓴다.** CSV의 정의가 "DB에 실제로 들어간 것"이
+되도록 하기 위해서다. 한 번 돌려두면 다음부터는 CSV 경로로 빠르게 다시 채울 수 있다.
+
+직접 만들 때는 헤더 한 줄을 포함한 CSV로 두고, `01_schema.sql`의 칼럼 순서에 맞춘다.
+
+```
+movies.csv        movie_id,title,original_title,release_date,runtime,director,vote_count,poster_path
+genres.csv        genre_id,name
+movie_genres.csv  movie_id,genre_id
+```
+
+**영화 데이터는 아무거나 된다.** TMDB일 필요가 없다. `movie_id`만 존재하면
+`03_seed_ratings.sql`의 시딩과 이후 실험이 그대로 작동한다.
+실제 제목을 쓰면 디버깅이 쉬울 뿐이다(`title = '스트립퍼 배심원'` vs `'random text 847293'`).
+
+CSV 변환을 awk가 아니라 PostgreSQL의 `COPY ... FORMAT csv`로 하는 이유는
+인용부호 처리 때문이다. 제목에 쉼표가 들어간 영화가 실제로 있다
+(`양 한 마리, 양 두 마리`). 손으로 TSV를 CSV로 바꾸면 그 행이 깨진다.
+
+user_rating은 CSV로 두지 않는다. `03_seed_ratings.sql`이 매번 같은 분포로
+다시 만들어내므로 500만 행을 저장할 이유가 없다.
 
 `03` 실행 후 반드시 `ANALYZE user_rating;`
 

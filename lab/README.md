@@ -41,6 +41,11 @@ user_rating  (user_id, movie_id, rating, created_at, updated_at)
 
 ### ② 영화 데이터 로드
 
+**영화 데이터는 저장소에 없다.** TMDB 약관상 6개월을 넘겨 캐시하거나
+데이터셋으로 재배포할 수 없어서다. 원본 덤프가 있으면 `MOHA_DUMP_DIR`로 적재하고,
+없으면 `lab/sql/dump-lite/`에 CSV를 직접 넣는다 — `movie_id`만 존재하면
+어떤 영화 데이터에서도 이후 실험이 그대로 작동한다(`lab/sql/README.md`).
+
 원본 덤프 위치 (원본 프로젝트의 `exec/sql_dump/`):
 ```
 movies/moha_movies_*.sql        19,701건

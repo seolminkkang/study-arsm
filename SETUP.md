@@ -8,19 +8,8 @@ clone 후 여기부터 따라간다. 회차 사전 과제("실행 환경을 자�
 > 단계는 [lab/README.md](lab/README.md)의 구축 순서 ①~⑦ 진행 상황에 맞춰
 > 이 문서도 갱신한다.
 
-## 먼저 확인할 것 — 원본 영화 덤프
-
-**3단계에서 원본 Moha Cinema 프로젝트의 `exec/sql_dump/`가 필요하다.**
-이 저장소에는 없다(용량 때문에 gitignore). 없으면 영화 데이터를 채울 수 없다.
-
-```
-exec/sql_dump/movies/moha_movies_2025-09-27_125634.sql
-exec/sql_dump/movies/moha_genres_2025-09-27_121107.sql
-exec/sql_dump/movies/moha_movie_genres_2025-09-27_121124.sql
-```
-
-이 경로를 확보하지 못했으면 **여기서 멈추고 Host에게 요청한다.**
-1·2단계를 다 해놓고 3단계에서 막히면 시간만 버린다.
+> 문서의 `C:/seolmin/backend-study` 경로는 작성자 기준이다.
+> 각자 clone한 경로로 바꿔 읽는다.
 
 ## 필요한 것
 
@@ -74,38 +63,70 @@ Grafana는 익명 접근을 켜뒀으므로 브라우저에서 http://localhost:
 
 ## 3) 스키마 + 데이터 로드
 
-`MOHA_DUMP_DIR`에 **맨 위에서 확인한 원본 덤프 경로**를 넣는다.
-안 넣으면 스크립트가 `MOHA_DUMP_DIR (원본 exec/sql_dump 경로)를 지정하세요`로
-멈춘다.
+**영화 데이터는 저장소에 없다.** TMDB 약관상 6개월을 넘겨 캐시하거나
+데이터셋으로 재배포할 수 없어서다(README 출처 참고). 두 갈래 중 하나로 채운다.
+
+### 공통 — 스키마부터
 
 ```bash
 cd ../sql
-psql "postgresql://lab:lab@localhost:5433/labdb" -f 01_schema.sql
-MOHA_DUMP_DIR="<원본 프로젝트>/exec/sql_dump" ./02_load_movies.sh
-psql "postgresql://lab:lab@localhost:5433/labdb" -f 03_seed_ratings.sql
-psql "postgresql://lab:lab@localhost:5433/labdb" -c "ANALYZE user_rating;"
-psql "postgresql://lab:lab@localhost:5433/labdb" -f 04_indexes.sql
+docker exec -i lab-postgres psql -U lab -d labdb < 01_schema.sql
 ```
 
-`psql`이 로컬에 없으면 컨테이너 안의 psql로 대신할 수 있다. 파일은 표준입력으로 넣는다.
+컨테이너 안의 psql을 쓰므로 로컬에 PostgreSQL 클라이언트를 깔 필요가 없다.
+로컬에 `psql`이 있으면 `psql "postgresql://lab:lab@localhost:5433/labdb" -f 01_schema.sql`
+형태로 써도 결과는 같다.
+
+### (a) Moha 원본 덤프가 있다 — 팀원은 이 경로
 
 ```bash
-docker exec -i lab-postgres psql -U lab -d labdb < 01_schema.sql
+MOHA_DUMP_DIR="<원본 프로젝트>/exec/sql_dump" ./02_load_movies.sh
+```
+
+덤프에서 칼럼을 뽑아 적재하고, 그 결과를 `dump-lite/*.csv`로 남긴다.
+다음부터는 `./02_load_movies.sh`만 쳐도 그 CSV로 다시 채울 수 있다.
+경로는 Host에게 물어본다.
+
+### (b) 덤프가 없다 — 직접 채운다
+
+**막다른 길이 아니다.** `movies` / `genres` / `movie_genres`를 직접 채우면 된다.
+`01_schema.sql`의 칼럼에만 맞으면 **데이터는 아무거나 된다** — TMDB일 필요가 없다.
+`user_rating` 시딩은 `movie_id`만 존재하면 그대로 작동하고,
+그 이후의 실험은 전부 `user_rating` 위에서 벌어진다.
+
+`lab/sql/dump-lite/`에 헤더 한 줄을 포함한 CSV 세 개를 넣는다.
+
+```
+movies.csv        movie_id,title,original_title,release_date,runtime,director,vote_count,poster_path
+genres.csv        genre_id,name
+movie_genres.csv  movie_id,genre_id
+```
+
+```bash
+./02_load_movies.sh
+```
+
+건수는 달라도 된다. 실험 결과의 절대값이 이 문서의 숫자와 달라질 뿐,
+조건을 바꿨을 때의 방향은 같게 나온다. 자세한 건
+[lab/sql/README.md](lab/sql/README.md) 참고.
+
+### 공통 — 평점 시딩
+
+```bash
 docker exec -i lab-postgres psql -U lab -d labdb < 03_seed_ratings.sql
 docker exec    lab-postgres psql -U lab -d labdb -c "ANALYZE user_rating;"
 docker exec -i lab-postgres psql -U lab -d labdb < 04_indexes.sql
 ```
 
-(`02_load_movies.sh`는 이미 `docker exec`로 적재하므로 psql 설치와 무관하다.)
-
-`03_seed_ratings.sql`이 user_rating 500만 건을 채운다.
+`03_seed_ratings.sql`이 user_rating 500만 건을 채운다. 이 데이터는 저장소에
+넣지 않는다 — 스크립트가 매번 같은 분포로 다시 만들어내기 때문이다.
 소요 시간: **TODO — 최초 실행 시 실측해서 이 줄에 채워 넣는다.**
 (추측치를 적지 않는다. [CLAUDE.md](CLAUDE.md)의 "실측 없이 결론을 쓰지 않는다"
 원칙을 설정 문서에도 적용한다.)
 
 **이게 되면 성공:**
 ```sql
-SELECT count(*) FROM movies;        -- 19,701
+SELECT count(*) FROM movies;        -- 19,701  ((b)로 채웠으면 다른 값)
 SELECT count(*) FROM genres;        -- 19
 SELECT count(*) FROM movie_genres;  -- 47,104
 SELECT count(*) FROM user_rating;   -- 약 5,030,000
@@ -176,7 +197,8 @@ k6 run --duration 5s --vus 1 -e MODE=cursor -e PROFILE=rehearsal offset-vs-curso
 
 | 증상 | 원인 | 조치 |
 |---|---|---|
-| `MOHA_DUMP_DIR ...를 지정하세요` | 3단계에서 원본 덤프 경로를 안 줌 | 맨 위 "먼저 확인할 것" 참고. 덤프가 없으면 Host에게 요청 |
+| `영화 데이터가 없다. 둘 중 하나를 준비한다.` | `MOHA_DUMP_DIR`도 없고 `dump-lite/*.csv`도 없음 | 3단계 (a) 또는 (b). CSV는 저장소에 없다 — `git checkout`으로 복구되지 않는다 |
+| `lab-postgres가 안 떠 있다` | 2단계를 건너뜀 | `cd lab/docker && docker compose up -d` |
 | `./02_load_movies.sh: command not found` / 실행 안 됨 | Windows에서 cmd·PowerShell로 실행 | Git Bash에서 실행한다 |
 | `port is already allocated` | 5433·8080·3000·9090 중 하나를 다른 프로세스가 씀 | `lab/docker/.env`에 `POSTGRES_PORT` / `GRAFANA_PORT` / `PROMETHEUS_PORT`를 바꿔 넣거나 기존 프로세스 종료. 3000은 프런트 dev 서버와 자주 겹친다 |
 | 시딩 중 컨테이너가 멈추거나 매우 느림 | Docker Desktop에 할당된 메모리 부족 | Docker Desktop 설정 → Resources → Memory를 4GB 이상으로 |

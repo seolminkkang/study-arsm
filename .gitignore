@@ -1,5 +1,9 @@
 # 대용량 원본 덤프 — 스크립트만 커밋한다
 lab/sql/dump/
+# dump-lite/ 도 커밋하지 않는다. TMDB 약관상 6개월을 넘겨 캐시하거나
+# 데이터셋으로 재배포할 수 없다 — 저장소 커밋은 영구 보관이다.
+# 직접 만들어 넣으면 02_load_movies.sh가 그 경로로 적재한다 (lab/sql/README.md).
+lab/sql/dump-lite/
 *.dump
 *.sql.gz
 
