@@ -10,7 +10,7 @@
 | `04_indexes.sql` | 인덱스 생성/삭제 (실험 중 걸었다 뺐다) |
 | `00_find_test_ids.sql` | 시딩 후 헤비/라이트 유저, 인기 영화 ID 조회 (B급 쿼리 자리표시자 채우는 용도) |
 | `99_cleanup.sql` | 실험용으로 덧붙인 칼럼/인덱스 원복 |
-| `explain/` | B급 실험용 쿼리 모음 (`vault/sessions/001-plan.md` B-1~B-4) |
+| `explain/` | B급 실험용 쿼리 모음 (`vault/planning/001-plan.md` B-1~B-4) |
 | `dump-lite/` | 영화 데이터 CSV 3개. **gitignore.** 각자 만들어 넣는 자리다 |
 | `dump/` | 원본 덤프에서 awk로 뽑은 중간 산출물. gitignore |
 

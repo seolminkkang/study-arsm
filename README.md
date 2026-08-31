@@ -8,13 +8,13 @@
 예측하고 검증할 수 있습니다.
 
 > 문서의 `C:/seolmin/backend-study` 경로는 작성자 기준입니다.
-> 각자 clone한 경로로 바꿔 읽으면 됩니다(주로 `vault/sessions/001-cheatsheet.md`).
+> 각자 clone한 경로로 바꿔 읽으면 됩니다(주로 `vault/planning/001-cheatsheet.md`).
 
 ## 회차 목록
 
 | 회차 | 장 | 주제 | Host | 날짜 | 기록 | 글 |
 |---|---|---|---|---|---|---|
-| 1 | 2·3장 | 인덱스와 커넥션 풀 | 설민 | 2026-08-30 | [회차](vault/sessions/2026-08-30-1회차.md) · [계획](vault/sessions/001-plan.md) · [실험](vault/experiments/) · [측정](vault/raw/2026-08-30_exp-001_session_results.txt) | |
+| 1 | 2·3장 | 인덱스와 커넥션 풀 | 설민 | 2026-08-30 | [회차](vault/sessions/2026-08-30-1회차.md) · [계획](vault/planning/001-plan.md) · [실험](vault/experiments/) · [측정](vault/raw/2026-08-30_exp-001_session_results.txt) | |
 | 2 | 4·5장 | 외부 연동, 비동기 | 팀원 | | | |
 
 ## 1회차에서 나온 것
@@ -82,8 +82,8 @@
 |---|---|
 | 환경 띄우기 | [SETUP.md](SETUP.md) |
 | 방식이 궁금 | [CLAUDE.md](CLAUDE.md) → [vault/index.md](vault/index.md) |
-| 1회차에서 뭘 했나 | [001-overview](vault/sessions/001-overview.md) → [001-plan](vault/sessions/001-plan.md) → [experiments/](vault/experiments/) |
-| 직접 실행 | [001-cheatsheet](vault/sessions/001-cheatsheet.md) |
+| 1회차에서 뭘 했나 | [회차 기록](vault/sessions/2026-08-30-1회차.md) → [실험 노트](vault/experiments/) → [계획](vault/planning/001-plan.md) |
+| 직접 실행 | [001-cheatsheet](vault/planning/001-cheatsheet.md) |
 
 ## 규칙 4개
 

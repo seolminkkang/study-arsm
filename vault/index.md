@@ -21,7 +21,8 @@ tags: [index]
 | `raw/` | 측정 원본 (k6 출력, EXPLAIN, 캡처) | 금지 |
 | `experiments/` | 실험 노트 | 가능 |
 | `concepts/` | 개념 노트 | 가능 |
-| `sessions/` | 회차 기록 | 가능 |
+| `planning/` | 회차 전 준비물 (계획·커닝페이퍼·슬라이드) | 가능 |
+| `sessions/` | 회차 후 기록 | 가능 |
 | `output/` | 공개용 글 | 가능 |
 
 ## 바로가기

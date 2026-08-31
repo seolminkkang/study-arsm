@@ -58,12 +58,17 @@ raw/         측정 원본 (k6 출력, EXPLAIN 결과, Grafana 캡처)
 
 concepts/    개념 노트 (원자 단위)
 experiments/ 실험 노트 (가설 → 조건 → 결과 → 해석)
-sessions/    회차 기록
+planning/    회차 전 준비물 (plan / cheatsheet / overview.html)
+sessions/    회차 후 기록
              → 계속 다듬는다.
 
 output/      공개용 글
              → 위 셋에서 파생된다.
 ```
+
+회차 준비물은 `planning/`, 진행 기록은 `sessions/`에 둔다.
+`planning/`에는 회차당 3개를 만든다 — `plan.md`(계획) / `cheatsheet.md`(당일 실행) /
+`overview.html`(슬라이드). **개관을 md로 따로 만들지 않는다. 슬라이드와 중복이다.**
 
 `raw/`를 고치면 그때 실제로 무엇이 측정됐는지 확인할 방법이 사라진다.
 해석이 바뀌면 `experiments/`를 고치고 `raw/`는 그대로 둔다.
@@ -248,7 +253,7 @@ Security 필터 체인과 프레임워크 초기화가 섞여 병목 구분이 �
 
 ## 1회차 실험 명세
 
-`vault/sessions/001-plan.md` 에 A급 2개와 B급 4개의 조건·절차·판정 기준이 있다.
+`vault/planning/001-plan.md` 에 A급 2개와 B급 4개의 조건·절차·판정 기준이 있다.
 리허설과 당일 모두 그 문서를 따른다.
 
 절별 등급 배정과 넘긴 사유는 `vault/progress.md` 에 있다.
