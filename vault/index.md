@@ -27,7 +27,7 @@ tags: [index]
 
 ## 바로가기
 
-- [[progress]] — 책 목차, 절별 등급, 진도
+- [[progress]] — 책 목차, 절별 확인 방식, 진도
 - [[001-plan]] — 1회차 실험 명세 (A급 2개 + B급 4개)
 - [[log]] — 처리 이력
 - [[dashboard]] — Dataview 대시보드
