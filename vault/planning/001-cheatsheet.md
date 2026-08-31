@@ -36,6 +36,32 @@ tags: [cheatsheet]
 > B-3이 회차 간 1,788배 → 128배로 요동쳤고(OS 페이지 캐시), 풀 실험도 25% 편차가 있다.
 > "3배" "100배" 대신 **"빨라진다 / 느려진다 / 안 변한다"** 방향만 말한다.
 
+### EXPLAIN — 이 세 줄만 본다
+
+| | 어디 | 뭘 보나 |
+|---|---|---|
+| ① | **맨 윗줄** | `Index Only Scan` / `Index Scan` / `Bitmap Heap Scan` / `Seq Scan` 중 뭔가.<br>**1부의 전부가 이 한 줄이다** |
+| ② | `Rows Removed by Filter`<br>`Heap Fetches` / `Heap Blocks` | 읽고 **버린 양**, 테이블을 **몇 번 찾아갔나**.<br>인덱스를 제대로 썼으면 ①은 없고 `Heap Fetches: 0`이다 |
+| ③ | `Execution Time` | **참고만.** 같은 쿼리도 캐시 때문에 배로 달라진다 |
+
+**나머지(`cost`, `width`, `Recheck Cond`, `Planning Time`, `JIT`)는 오늘 안 본다.**
+
+### Grafana — 네 패널, 언제 뭘 보나
+
+**1부(EXPLAIN)에서는 이 화면을 안 본다. 2부부터 본다.**
+부하가 없으면 3·4번은 바닥에 평평하다 — 그게 정상이다.
+
+| | 패널 | 볼 때 |
+|---|---|---|
+| 1 | TPS (초당 처리한 건수) | 부하를 계단식으로 올리는데 **이게 안 오르기 시작하는 지점** |
+| 2 | p95 (느린 쪽 5%) | 1번은 평평한데 **이것만 치솟는 순간** |
+| 3 | `pending` (줄 선 수) | **0에서 올라가는 순간.** 같은 패널 `active`가 `max`와 같으면 풀이 꽉 참 |
+| 4 | DB CPU | **190% 위에 붙어 있나** (`cpus: 2`라 200%가 상한) |
+
+> **2부의 하이라이트:** 1번은 안 오르는데 2·3번은 치솟고 4번은 190%에 붙어 있다.
+> 그때 던질 질문 — **"커넥션을 더 주면 빨라질까?"**
+
+
 ### 원복 규칙 — 실험이 만든 건 그 실험 끝나면 바로 지운다
 
 | 실험 | 만드는 것 | 지우는 시점 |
@@ -154,6 +180,9 @@ docker exec -i lab-postgres psql -U lab -d labdb < 00_find_test_ids.sql
 
 > 보여주는 것: **타입이 안 맞으면** 인덱스가 무용지물이 된다
 
+🗣 **치기 전에** — 두 쿼리를 나란히 띄우고 **"뭐가 다른지"** 찾게 한다.
+> 답을 말하지 말고 찾게 둔다. (답: 조인 칼럼 하나. `r.movie_id` vs `r.movie_id_str::int`)
+
 **비교 조건 — 변수는 하나뿐이다**
 
 | | 쿼리 ①  | 쿼리 ② |
@@ -186,13 +215,16 @@ EXPLAIN ANALYZE SELECT r.* FROM user_rating r JOIN movies m
 ON r.movie_id_str::int = m.movie_id WHERE m.movie_id = 60300;"
 ```
 
-👉 가리킬 곳
+👉 가리킬 곳 — 카드의 ①②③ 순서로 본다
 
-| | ① 타입 같음 | ② 타입 다름 |
-|---|---|---|
-| 스캔 | `Bitmap Index Scan on idx_user_rating__movie_rating` | **`Parallel Seq Scan`** |
-| Filter | 없음 | `((movie_id_str)::integer = 60300)` |
-| 버린 행 | — | `Rows Removed by Filter: 1,673,220` |
+| | ① 스캔 방식 | ② 버린 양 | ③ 시간 |
+|---|---|---|---|
+| 타입 같음 | `Bitmap Index Scan` | 없음 | 529ms |
+| 타입 다름 | **`Parallel Seq Scan`** | **`Rows Removed by Filter: 1,673,220`** (워커당) | 527ms |
+
+**③이 같다.** 529ms vs 527ms다. 시간만 보면 아무 일도 안 일어난 것처럼 보인다.
+차이는 ①과 ②에 있다 — 한쪽은 인덱스로 필요한 것만 찾았고,
+다른 쪽은 500만 행을 다 읽고 버렸다. `Filter: ((movie_id_str)::integer = 60300)`
 
 ❓ **"차이는 `movie_id` 하나뿐인데 왜 아래만 인덱스를 못 탈까?"**
 
@@ -213,6 +245,9 @@ SELECT pg_size_pretty(pg_relation_size('user_rating'));"
 
 > 보여주는 것: **너무 많이 읽으면** DB가 인덱스를 스스로 포기한다.
 > 그런데 **"몇 %부터"라는 고정된 답은 없다.**
+
+🗣 **치기 전에** — **"인덱스가 있으면 항상 쓸까?"** 를 먼저 묻는다.
+> 인덱스는 `user_id`에 걸려 있고 네 단계 모두 그 인덱스를 쓸 수 있는 조건이다.
 
 **비교 조건 — 쿼리는 똑같다. 조회 범위만 넓어진다**
 
@@ -296,6 +331,10 @@ EXPLAIN ANALYZE SELECT * FROM user_rating WHERE user_id BETWEEN 1 AND 8000;"
 
 > 보여주는 것: **컬럼 하나 더 요구하면** 테이블을 읽으러 간다
 
+🗣 **치기 전에** — 두 SELECT 목록을 나란히 보여주고 비교시킨다.
+> `SELECT movie_id, rating` 과 `SELECT movie_id, rating, updated_at`.
+> **"칼럼 하나 차이인데 뭐가 달라질까?"**
+
 **비교 조건 — WHERE는 같다. SELECT 목록만 다르다**
 
 | | 쿼리 ① | 쿼리 ② |
@@ -319,12 +358,16 @@ docker exec lab-postgres psql -U lab -d labdb -c "
 EXPLAIN ANALYZE SELECT movie_id, rating, updated_at FROM user_rating WHERE movie_id = 60300;"
 ```
 
-👉 가리킬 곳
+👉 가리킬 곳 — 카드의 ①②③ 순서로 본다
 
-| | ① | ② |
-|---|---|---|
-| 스캔 | **`Index Only Scan`** | `Bitmap Heap Scan` |
-| 테이블 접근 | `Heap Fetches: 0` | `Heap Blocks: exact=...` (수천 개) |
+| | ① 스캔 방식 | ② 테이블 접근 | ③ 시간 |
+|---|---|---|---|
+| `movie_id, rating` | **`Index Only Scan`** | `Heap Fetches: 0` | 0.77ms |
+| `+ updated_at` | `Bitmap Heap Scan` | **`Heap Blocks: 9310`** | 16.4ms |
+
+**②가 이 실험의 핵심이다.** `Heap Fetches: 0`은 테이블을 한 번도 안 읽었다는 뜻이고,
+`Heap Blocks: 9310`은 8KB짜리 블록 9,310개(약 73MB)를 읽었다는 뜻이다.
+③은 캐시 상태에 따라 요동치므로 배수로 말하지 않는다.
 
 ❓ **"칼럼 하나 더 달라고 했을 뿐인데 왜 테이블을 읽으러 갈까?"**
 
@@ -333,6 +376,10 @@ EXPLAIN ANALYZE SELECT movie_id, rating, updated_at FROM user_rating WHERE movie
 ### B-4 복합 인덱스 컬럼 순서 (5분) · 3장 「단일 인덱스와 복합 인덱스」
 
 > 보여주는 것: **컬럼 순서**가 중요한데, 쿼리 모양에 따라 안 중요할 수도 있다
+
+🗣 **치기 전에** — 인덱스 두 개를 **전화번호부**로 설명한다.
+> ① `(user_id, updated_at)` 는 **성 → 이름** 순, ② `(updated_at, user_id)` 는 **이름 → 성** 순.
+> 그 다음 **"뒤집으면 나빠질까? 두 쿼리 다 똑같이?"** 를 글로 적게 한다.
 
 #### 구조 먼저 — 총 4번 실행한다
 
@@ -402,13 +449,20 @@ EXPLAIN ANALYZE SELECT * FROM user_rating
 WHERE user_id = 36 AND updated_at >= '2026-01-01';"
 ```
 
-👉 결과표 (2026-08-29 실측 — **방향만 본다**)
+👉 가리킬 곳 — 카드의 ①②③ 순서로 본다
 
-| | 쿼리 A (ORDER BY) | 쿼리 B (없음) |
-|---|---|---|
-| 인덱스 ① | 1.4ms | 0.9ms |
-| 인덱스 ② | 2.3ms | 93.8ms |
-| | **거의 안 변함** | **크게 나빠짐** |
+| | | ① 스캔 방식 | ③ 시간 |
+|---|---|---|---|
+| 인덱스 ① `(user, updated)` | 쿼리 A | `Index Scan` | 0.27ms |
+| | 쿼리 B | `Bitmap Heap Scan` | 1.8ms |
+| 인덱스 ② `(updated, user)` | 쿼리 A | `Index Scan` | 2.9ms |
+| | 쿼리 B | **`Parallel Seq Scan`** | **113ms** |
+
+② 버린 양 — 인덱스 ② 쿼리 B에서만 `Rows Removed by Filter: 1,675,371`이 뜬다.
+
+**쿼리 A는 ①이 양쪽 다 `Index Scan`이라 시간도 비슷하다.**
+**쿼리 B는 ①이 갈린다** — 인덱스를 버리고 순차 스캔으로 떨어진다.
+차이의 크기를 정한 건 인덱스가 아니라 쿼리 모양이다.
 
 ❓ **"왜 한쪽만 크게 나빠졌지? 두 쿼리 차이가 뭐였지?"**
 (정답 미리 말하지 말 것)
@@ -446,6 +500,10 @@ SELECT pg_size_pretty(pg_relation_size('user_rating'));"
 > 보여주는 것: **공식은 상한선일 뿐이고, 진짜 병목은 화면에서 찾아야 한다.**
 > 흐름: 부하 → 처리량 안 오름 → 계산해보니 14배 차이 → 뭐가 빠졌지 →
 >       DB CPU 197% → 풀을 늘리면? → 오히려 줄어듦
+
+🗣 **치기 전에** — **부하가 4 rps뿐이라는 걸 먼저 말한다.**
+> "초당 4건이야. 이 정도면 버틸까?"
+> 숫자를 먼저 못 박아야 나중에 "겨우 4 rps를 못 버텼다"가 충격으로 남는다.
 
 **비교 조건 — 앱 설정만 바꾼다. 부하도 쿼리도 고정**
 
@@ -633,6 +691,10 @@ java -jar build/libs/lab-app-0.0.1.jar
 > 보여주는 것: **같은 인덱스가 한쪽은 빠르게, 한쪽은 느리게 만든다.**
 > 흐름: 오프셋 느림 → "인덱스 걸면 되겠네" → 걸었더니 더 느려짐 → 왜? → 커서로 교체
 > **이 회차의 하이라이트다.** 확신을 갖고 예측한 게 정반대로 나온다.
+
+🗣 **치기 전에** — 두 방식이 **같은 결과를 준다**는 걸 먼저 확인시킨다.
+> 오프셋 응답과 커서 응답을 나란히 띄우고 "같은 데이터지?"를 확인한 다음 묻는다.
+> **"방법만 다른데 얼마나 차이 날까?"**
 
 ### 오프셋 vs 커서 (15분)
 
