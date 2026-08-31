@@ -61,16 +61,17 @@
 > 이름만 바꾸면 링크와 노트가 전부 흔들립니다.
 > **A = 부하 실험, B = 단건 확인, C = 읽고 넘김**이고, 등급이 아니라 방식 구분입니다.
 
-
 ## 어디부터 읽나
 
-| 하려는 것 | 읽을 순서 |
+| 하려는 것 | 어디로 |
 |---|---|
 | 환경 띄우기 | [SETUP.md](SETUP.md) |
 | 방식이 궁금 | [CLAUDE.md](CLAUDE.md) → [vault/index.md](vault/index.md) |
-| 1회차에서 뭘 했나 | [계획](vault/planning/001-plan.md) → [회차 기록](vault/sessions/2026-08-30-1회차.md) → [실험 노트](vault/experiments/) |
-| 슬라이드로 보기 | [001-overview.html](vault/planning/001-overview.html) (다운받아 브라우저로 연다) |
-| 직접 실행 | [001-cheatsheet](vault/planning/001-cheatsheet.md) |
+| 특정 회차를 보고 싶다 | 위 [회차 목록](#회차-목록)의 "기록" 칸. 회차 노트 하나에 그 회차 문서가 전부 링크돼 있다 |
+| 회차를 준비한다 | [vault/planning/](vault/planning/) |
+| 실험 결과만 보고 싶다 | [vault/experiments/](vault/experiments/) · [vault/raw/](vault/raw/) |
+| 책 어디까지 했나 | [vault/progress.md](vault/progress.md) |
+
 ## 폴더 구조
 
 | 경로 | 내용 |
