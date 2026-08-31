@@ -28,6 +28,11 @@ MOHA_DUMP_DIR="<원본>/exec/sql_dump" ./02_load_movies.sh   # 기본 경로
 ./02_load_movies.sh                                       # dump-lite/*.csv 가 있을 때
 ```
 
+> ⚠ **`app/` 폴더는 절대 읽지 않는다.** 실제 사용자 이메일과 비밀번호 해시가
+> 들어 있다(`app/moha_user_account_*.sql` 146명, `98_demo_login.sql`은 평문 비밀번호).
+> 실습에 필요한 건 `movies/`의 3개 파일뿐이다. 스크립트는 그 세 파일명을 직접
+> 명시해서 읽는다 — 와일드카드를 쓰지 않는 이유가 이것이다.
+
 `MOHA_DUMP_DIR`를 주면 awk로 칼럼을 뽑아 `dump/*.tsv`를 만들고, 그걸 적재한 뒤
 **적재 결과를 다시 `dump-lite/*.csv`로 쓴다.** CSV의 정의가 "DB에 실제로 들어간 것"이
 되도록 하기 위해서다. 한 번 돌려두면 다음부터는 CSV 경로로 빠르게 다시 채울 수 있다.

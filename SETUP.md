@@ -87,6 +87,10 @@ MOHA_DUMP_DIR="<원본 프로젝트>/exec/sql_dump" ./02_load_movies.sh
 다음부터는 `./02_load_movies.sh`만 쳐도 그 CSV로 다시 채울 수 있다.
 경로는 Host에게 물어본다.
 
+> ⚠ **`app/` 폴더는 절대 읽지 않는다.** 실제 사용자 이메일과 비밀번호 해시가
+> 들어 있다(`app/moha_user_account_*.sql` 146명, `98_demo_login.sql`은 평문 비밀번호).
+> 실습에 필요한 건 `movies/`의 3개 파일뿐이고, 스크립트도 그 세 개만 읽는다.
+
 ### (b) 덤프가 없다 — 직접 채운다
 
 **막다른 길이 아니다.** `movies` / `genres` / `movie_genres`를 직접 채우면 된다.
