@@ -1,0 +1,35 @@
+server:
+  address: 127.0.0.1
+  port: 8081
+  tomcat:
+    threads:
+      max: 20
+    mbeanregistry:
+      enabled: true
+spring:
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5434/integration}
+    username: integration
+    password: integration
+    hikari:
+      maximum-pool-size: ${DB_POOL_SIZE:4}
+      connection-timeout: 2000
+  sql:
+    init:
+      mode: always
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,prometheus
+  metrics:
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true
+lab:
+  role: ${LAB_ROLE:review}
+  points-url: ${POINTS_URL:http://localhost:8082}
+  http-pool: ${HTTP_POOL_SIZE:2}
+  acquire-ms: ${HTTP_ACQUIRE_MS:500}
+  connect-ms: ${HTTP_CONNECT_MS:1000}
+  read-ms: ${HTTP_READ_MS:1000}

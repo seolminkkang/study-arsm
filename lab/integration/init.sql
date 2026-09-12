@@ -1,0 +1,2 @@
+CREATE SCHEMA review;
+CREATE SCHEMA points;
