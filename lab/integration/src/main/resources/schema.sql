@@ -7,4 +7,20 @@ CREATE TABLE IF NOT EXISTS point_grants (
   review_id VARCHAR(100) NOT NULL,
   amount INTEGER NOT NULL
 );
--- 의도적으로 review_id UNIQUE 제약이 없다. 실습에서 직접 개선한다.
+-- NULL 키는 문제 버전, 업무 ID 키는 해결 버전이다. 기존 지급 행은 변경하지 않는다.
+ALTER TABLE point_grants ADD COLUMN IF NOT EXISTS dedupe_key VARCHAR(100);
+CREATE UNIQUE INDEX IF NOT EXISTS point_grants_dedupe ON point_grants(dedupe_key);
+CREATE TABLE IF NOT EXISTS outbox (
+  review_id VARCHAR(100) PRIMARY KEY,
+  channel VARCHAR(10) NOT NULL,
+  status VARCHAR(10) NOT NULL DEFAULT 'WAITING',
+  attempts INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS backup_grants (
+    id BIGSERIAL PRIMARY KEY, review_id VARCHAR(100) NOT NULL, amount INTEGER NOT NULL,
+    dedupe_key VARCHAR(100) UNIQUE
+);
+CREATE TABLE IF NOT EXISTS batch_received (id VARCHAR(100) PRIMARY KEY, content TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS cdc_source (id VARCHAR(100) PRIMARY KEY, status TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS cdc_target (id VARCHAR(100) PRIMARY KEY, status TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS cdc_seen (event_key TEXT PRIMARY KEY);

@@ -1,0 +1,316 @@
+<!doctype html>
+<html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>두 화면 실습실 · 외부 연동</title>
+<style>
+:root{color-scheme:light;--bg:#f5f3ef;--paper:#fffefa;--ink:#1d2c35;--muted:#596872;--line:#deded4;--blue:#285ccd;--tint:#edf2ff;--red:#a43827;--green:#206047}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.65 system-ui,-apple-system,"Apple SD Gothic Neo",sans-serif;word-break:keep-all;overflow-wrap:anywhere}
+header{border-bottom:1px solid var(--line);background:var(--paper)}.bar{max-width:960px;margin:auto;padding:17px 24px;display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap}
+.brand{font-weight:800}.badge{display:inline-block;font-size:12px;padding:4px 9px;border-radius:6px;background:var(--tint);color:var(--blue);font-weight:750;vertical-align:middle}.badge.good{background:#eaf5ed;color:var(--green)}
+main{max-width:960px;padding:26px 24px 80px;margin:auto}h1{font-size:clamp(24px,3.8vw,32px);line-height:1.3;letter-spacing:-.035em;margin:12px 0 18px}h2{font-size:20px;line-height:1.4;margin:0 0 14px}h3{font-size:16px;margin:0 0 8px}p{margin:8px 0 14px}.muted,small{color:var(--muted)}small{font-size:13px}
+.eyebrow{color:var(--blue);font-size:13px;letter-spacing:.08em;font-weight:800}.card{margin:20px 0;padding:26px;background:var(--paper);border:1px solid var(--line);border-radius:15px}
+.lead{max-width:68ch}.definition{border-left:3px solid var(--blue);padding:10px 16px;background:var(--tint);margin:18px 0}.row{display:flex;gap:12px;align-items:center;flex-wrap:wrap}.spread{justify-content:space-between}
+button,select,input,textarea{font:inherit}button,select{min-height:44px;border-radius:8px;border:1px solid #c7cdd0;background:white;color:var(--ink);padding:8px 15px}
+button{cursor:pointer;font-weight:650}button.primary{background:var(--blue);color:white;border-color:var(--blue)}button.danger{background:var(--red);border-color:var(--red);color:white}
+button:disabled{opacity:.45;cursor:not-allowed}button:hover:enabled{filter:brightness(.96)}:focus-visible{outline:3px solid #de950a;outline-offset:3px}
+select{max-width:100%;width:100%}textarea{width:100%;resize:vertical;min-height:116px;border:1px solid #c7cdd0;border-radius:8px;padding:12px;background:#fff;line-height:1.5;margin:6px 0 14px;word-break:normal}
+label{display:block;font-weight:650}pre{margin:12px 0;padding:16px;background:#182b39;color:#e9f1f6;border-radius:8px;font:14px/1.7 ui-monospace,SFMono-Regular,Consolas,monospace;white-space:pre-wrap;word-break:break-word;overflow-wrap:anywhere}
+pre.raw{max-height:340px;overflow:auto;background:#f2f4f5;color:var(--ink)}.notice{padding:12px 16px;border-radius:8px;background:#fff0d5;color:#6c4e13;margin:12px 0}.error{background:#ffece7;color:#902a21}
+ul{padding-left:22px;margin:8px 0}li{margin:8px 0}.stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}.stat{border:1px solid var(--line);padding:16px;border-radius:10px;background:#fff}
+.value{font-size:30px;font-weight:800;line-height:1.2;margin:10px 0;color:var(--ink)}.stat small{display:block}.live-dot{display:inline-block;width:8px;height:8px;background:var(--green);border-radius:50%;margin-right:6px}
+table{width:100%;border-collapse:collapse;font-size:14px}th,td{text-align:left;padding:12px 8px;border-bottom:1px solid var(--line);word-break:break-word}th{color:var(--muted);font-weight:650}td:first-child{width:48%}
+.chart{margin-top:20px;padding-top:18px;border-top:1px solid var(--line)}svg{display:block;width:100%;height:auto;background:#fff}.legend{font-size:13px;display:flex;gap:18px;flex-wrap:wrap;margin-bottom:8px}
+.key{display:inline-block;width:16px;height:3px;margin-right:5px;vertical-align:middle}.foot{padding-top:20px;border-top:1px solid var(--line);font-size:13px;color:var(--muted)}details{margin:14px 0}summary{cursor:pointer;font-weight:650;padding:8px 0}
+.statusline{font-size:13px;line-height:1.5;color:var(--muted)}.chip{padding:3px 9px;border:1px solid var(--line);border-radius:20px;font-size:13px}
+.lesson-block{margin-top:24px;padding-top:20px;border-top:1px solid var(--line)}.lesson-block p{max-width:68ch}
+.evidence-values{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:0;margin:16px 0}.evidence-values dt,.evidence-values dd{margin:0;padding:10px 0;border-bottom:1px solid var(--line)}.evidence-values dd{text-align:right;padding-left:12px;color:var(--blue)}
+.terms{margin:0}.terms dt{font-weight:750;margin-top:18px}.terms dd{margin:5px 0 0;max-width:68ch;color:var(--muted)}
+.trace{list-style:none;counter-reset:trace;padding:0;display:grid;gap:12px}.trace li{counter-increment:trace;position:relative;margin:0;padding:15px 16px 15px 51px;border:1px solid var(--line);border-radius:10px;background:#fff}
+.trace li:before{content:counter(trace);position:absolute;left:15px;top:15px;color:var(--blue);font-weight:800}.trace p{margin:5px 0 0;max-width:65ch}
+.paired-list{padding-left:22px}.paired-list li{padding-bottom:9px;max-width:68ch}.paired-list strong{display:block;margin-bottom:4px}
+#resetPhrase{width:100%;max-width:420px;padding:10px;border:1px solid #c7cdd0;border-radius:8px;margin:8px 0 12px}.danger-zone{border-color:#dab6ad}
+#toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);padding:10px 18px;background:#182b39;color:white;border-radius:10px;max-width:90vw;z-index:3}
+[hidden]{display:none!important}.checkline{display:flex;gap:10px;align-items:flex-start;padding:12px;background:#fff0d5;border-radius:8px;font-weight:500}.checkline input{margin-top:7px;flex:none}
+@media(max-width:600px){main{padding:20px 16px 60px}.bar{padding:14px 16px}.card{padding:20px 16px}.stats{gap:7px}.stat{padding:12px 9px}.stat .value{font-size:24px}.stat small{font-size:12px}button{padding:8px 11px}th,td{padding:10px 5px}}
+@media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important}}
+</style></head>
+<body><header><div class="bar"><div class="brand">ARSΜ / 두 화면 실습실 <span class="badge" id="roleLabel"></span></div><div class="statusline" id="connection">연결 확인 중…</div></div></header>
+<main>
+<div id="fatal" class="notice error" hidden></div>
+<div id="resetNotice" class="notice" role="status" hidden></div>
+<div class="row spread"><span class="eyebrow">CHAPTER 04—05 · 외부 연동</span><small id="sessionId"></small></div>
+<details class="card"><summary>전체 커리큘럼 · 31단계에서 무엇을 배우나?</summary>
+<p>공통 질문: <strong>응답은 어떻게 왔고, 실제 작업은 어디까지 끝났으며, 실패 뒤 무엇으로 복구할까?</strong></p>
+<p>1–14단계는 동기 연동 보호, 15–20단계는 비동기 내구성과 메시징, 21–30단계는 배치·CDC·대체 제공자다. 31단계는 조건 정리다. 아래는 실험을 건너뛰는 버튼이 아니라 전체 길잡이다.</p>
+<ol id="curriculum" class="paired-list"></ol>
+<p class="notice">중간에 쉬어도 화면 서버와 Docker가 켜져 있으면 진행 상태가 유지됩니다. 화면 서버 재시작은 새 세션이므로 기록을 내려받으세요. CDC 진행 중에는 재개 또는 마무리로 슬롯을 닫은 뒤 종료하세요.</p></details>
+<div id="operatorNav" class="card" hidden>
+<label for="stepSelect">현재 실험 · 선택하면 친구 화면도 함께 바뀝니다</label>
+<select id="stepSelect" aria-label="실험 단계 선택"></select>
+<div class="row spread" style="margin-top:12px"><small>읽기 → 두 사람의 예측 → 실행 → 실제 결과 → 해설</small><button id="shareButton">친구 접속 주소</button></div>
+<div id="shareBox" hidden><p>관찰자 노트북에서 아래 주소를 여세요. 실행자 노트북의 같은 Wi-Fi IP입니다.</p><pre id="shareUrl"></pre><button id="copyShare">주소 복사</button><p><small>관찰 화면만 공유합니다. 같은 신뢰하는 Wi-Fi에서만 사용하세요. 공유기 포트포워딩·인터넷 배포는 하지 않습니다.</small></p></div>
+</div>
+<div id="observerIntro" class="notice" hidden>보는 방법: 실행자가 단계를 넘기면 이 화면도 바뀝니다. 예측은 말로 전달해 실행자가 함께 기록하고, 실행 후 아래 실제 결과를 설명해주세요.</div>
+<section id="intro"><div class="eyebrow" id="group"></div><h1 id="title">실습에 연결하고 있습니다</h1><p class="lead" id="situation">실행자 노트북에서 화면 서버가 켜져 있어야 합니다.</p><div class="definition" id="definition"></div></section>
+<section class="card" id="lessonCard"><div class="eyebrow">실험 전 · 먼저 이해하기</div><h2 id="goal" style="margin-top:12px"></h2>
+<dl class="terms" id="terms"></dl>
+<div class="lesson-block"><h3>예시로 연결하면</h3><p id="example"></p></div>
+<div class="lesson-block"><h3>이번 코드의 흐름</h3><small>실측 재생이 아니라 코드 구조를 읽는 순서입니다.</small><ol class="trace" id="flow"></ol></div>
+<div class="lesson-block"><h3>무엇을 바꾸고, 무엇을 그대로 둘까?</h3><dl class="terms" id="conditions"></dl></div>
+</section>
+<section class="card"><h2>관찰자가 볼 것</h2><ul id="watch"></ul></section>
+<section class="card" id="codeCard" hidden><div class="eyebrow">읽기용 코드 · 직접 입력하지 않습니다</div><h2>어떤 코드가 바뀌는 걸까?</h2>
+<p>버튼은 미리 구현된 기존/개선 분기를 실행합니다. 소스 파일을 덮어쓰거나 터미널을 열 필요가 없습니다. 아래는 핵심 구조를 발췌한 코드입니다.</p>
+<h3>변경 전 · 문제의 경계</h3><pre id="codeBefore"></pre><h3>변경 후 · 해결의 경계</h3><pre id="codeAfter"></pre>
+<div class="definition"><p id="codeNotes"></p></div><small id="codeSource"></small></section>
+<section class="card" id="prepareCard" hidden><h2>다음 실험 준비 · 결과를 비교하는 실험은 아닙니다</h2>
+<p>이전 조건이 다음 결과에 섞이지 않게 정리합니다. DB를 비우는 초기화와 다릅니다.</p><h3>완료 기준</h3><p id="prepareExpected"></p><h3>실제로 확인한 내용</h3><div id="prepareEvidence">버튼 실행 후 실제 확인 기록이 표시됩니다.</div></section>
+<section class="card" id="predictionCard" hidden>
+<h2>실행 전 · 항목별로 예측하기</h2><p id="question"></p><ol class="paired-list" id="prompts"></ol>
+<p class="muted">각 질문에 예상과 이유를 한 줄씩 말해보세요. 정답을 맞히는 시험이 아닙니다. 모르면 ‘어느 부분을 모르겠는지’를 남기고 실제 결과와 비교하면 됩니다.</p>
+<div id="predictionInputs">
+<label for="operatorPrediction">실행자 · 어떻게 될까? 그 이유는?</label><textarea id="operatorPrediction" placeholder="모르겠다면 궁금한 점을 적어도 괜찮아요."></textarea>
+<label for="observerPrediction">관찰자 · 친구가 말한 예측을 함께 기록</label><textarea id="observerPrediction" placeholder="서로 다른 예측도 그대로 남겨주세요."></textarea>
+<div class="row"><button id="saveNotes">예측 저장</button><small id="noteStatus">실행 전에 두 칸을 저장해주세요.</small></div>
+</div>
+</section>
+<section class="card" id="executeCard" hidden>
+<div class="row spread"><h2>실제로 실행하기</h2><span class="badge" id="executeBadge">실제 서비스 변경</span></div>
+<p id="does"></p><p class="muted">아래 버튼만 누르세요. 설정 변경·요청 전송·관찰 대기는 자동으로 이어집니다.</p>
+<details><summary>버튼이 실행하는 내부 명령 · 참고용</summary><pre id="command"></pre><button id="copyCommand">명령 복사</button></details>
+<label id="confirmLine" class="checkline" style="margin-top:18px" hidden><input type="checkbox" id="confirmCrash">이 실습의 review 컨테이너만 강제 종료하고 재시작합니다. 메모리에 대기 중인 지급 작업이 유실될 수 있음을 확인했습니다.</label>
+<div class="row" style="margin-top:20px"><button class="primary" id="runButton">이 단계 실행</button><span id="runStatus" class="statusline"></span></div>
+<div id="actionError" class="notice error" hidden></div>
+</section>
+<section class="card" id="observeCard">
+<div class="row spread"><h2 id="resultsTitle">관찰 대기</h2><span class="badge" id="modeBadge">실시간</span></div>
+<p id="resultContext" class="muted"></p>
+<div class="row" style="margin-bottom:16px"><span class="chip" id="healthA">A 확인 중</span><span class="chip" id="healthB">B 확인 중</span><span class="chip" id="faultState">장애 설정 확인 중</span></div>
+<div id="snapshotWarning" class="notice error" hidden></div>
+<div class="stats"><div class="stat"><small>추적 중인 리뷰</small><div class="value" id="reviewCount">—</div><small>DB에 저장된 건수</small></div><div class="stat"><small>포인트 지급 내역</small><div class="value" id="grantCount">—</div><small>같은 리뷰의 중복도 셈</small></div><div class="stat"><small>실제 지급 총액</small><div class="value" id="totalPoints">—</div><small>포인트 · 응답과 별개</small></div></div>
+<p id="workerState" class="muted"></p>
+<div id="solutionState"></div><div id="extensionEvidence" hidden></div><div id="comparison" class="lesson-block" hidden></div>
+<div id="responseSummary"></div>
+<div class="lesson-block" id="readingGuide" hidden><h3>이 결과는 이렇게 읽으세요</h3><ol class="paired-list" id="reading"></ol></div>
+<div id="charts"></div>
+<details id="dataDetails"><summary>이번 reviewId별 실제 데이터</summary><div id="dataTable"></div></details>
+<div id="connectionEvidence" hidden><h3>연결 재사용 관찰 · B 로그</h3><pre class="raw" id="connectionLog"></pre></div>
+<details><summary>실행 명령·응답 원본 펼치기</summary><pre class="raw" id="rawEvidence">아직 실행하지 않았습니다.</pre></details>
+<button id="toggleLive" hidden>실시간 상태로 전환</button>
+</section>
+<section class="card" id="whyCard"><h2>결과를 읽은 뒤에</h2><button id="showWhy" disabled>확인 기준과 해설 열기</button><p class="muted" id="whyHint">실행이 끝난 다음 열 수 있습니다. 예상값을 실제 측정값으로 표시하지 않습니다.</p>
+<div id="whyContent" hidden><div class="lesson-block"><h3>이번 방식의 예상 결과 · 실측값과 대조</h3><p id="expected"></p></div>
+<div class="lesson-block"><h3>왜 그런 결과가 생겼을까?</h3><ol class="trace" id="reasoning"></ol></div>
+<div class="definition"><h3>핵심 결론</h3><p id="why"></p></div><div class="notice"><h3>여기까지 일반화하면 안 돼요</h3><p id="caution"></p></div>
+<div class="lesson-block"><h3>다음 문제에 적용해보기</h3><p id="transfer"></p><p class="muted" id="next"></p></div></div>
+<div id="reflectionBox" hidden><label for="reflection">실제 결과를 어떻게 해석했는지 · 아직 모르는 것</label><textarea id="reflection" placeholder="예측과 무엇이 달랐고, 어떤 근거로 설명할 수 있나요?"></textarea><button id="saveReflection">해석 저장</button></div>
+</section>
+<div class="row spread" id="bottomNav"><button id="previous">이전 단계</button><button class="primary" id="nextStep">다음 단계</button></div>
+<section class="card"><h2>기록과 추가 관찰</h2><p>서비스 값은 Prometheus와 실제 리뷰·지급 API에서 읽습니다. 더 자세한 시계열은 실행자 노트북의 Grafana에서 볼 수 있지만, 실습 중 반드시 열 필요는 없습니다.</p><div class="row"><button id="download">예측·실행·관찰 원본 내려받기</button><button id="newSession" hidden>새 세션 시작</button></div><small>새 세션은 이전 기록이나 DB를 지우지 않습니다. 다운로드에는 두 사람의 메모와 실습 데이터가 포함됩니다.</small></section>
+<section class="card danger-zone" id="resetCard" hidden><h2>처음부터 다시 돌려보고 싶다면</h2>
+<p><strong>기존 영화 실습 DB는 그대로 둡니다.</strong> 아래 초기화는 별도 <code>arsm-integration</code> 환경의 리뷰·지급·배치·CDC 실습 데이터를 비웁니다. 이전 실험 기록과 백업 파일은 남습니다.</p>
+<details id="resetDetails"><summary>이번 실험 초기화 · 지워지는 범위 확인</summary>
+<ol class="paired-list"><li><strong>A·B를 먼저 중지</strong>메모리에 남은 작업은 폐기합니다. 다른 터미널의 부하 테스트나 수동 요청은 먼저 직접 중단해주세요.</li>
+<li><strong>전용 DB 백업 후 실습 8개 테이블 비우기</strong><code>review.reviews</code>, <code>review.outbox</code>, <code>review.batch_received</code>, <code>review.cdc_source</code>, <code>review.cdc_target</code>, <code>review.cdc_seen</code>, <code>points.point_grants</code>, <code>points.backup_grants</code>의 모든 행을 비웁니다. 직접 넣은 실험 데이터도 포함합니다. 백업 실패 시 삭제하지 않습니다. A·B·대체 제공자를 먼저 멈춥니다. 큐는 비어 있고 소비자는 정지해야 하며, 미완료 CDC 슬롯이 있으면 초기화를 거절합니다. 먼저 마무리 단계를 실행하세요. 배치 파일·기록은 남습니다.</li>
+<li><strong>기본 실행 설정으로 재시작</strong>HTTP 풀 2 · DB 풀 4 · 획득 대기 500ms · 연결/응답 대기 1000ms로 A·B를 다시 띄우고 새 세션의 준비 단계로 돌아갑니다.</li></ol>
+<div class="notice">코드 수정·추가 테이블·스키마 변경은 되돌리지 않습니다. 기존 DB, 예측/해석 파일과 Grafana/Prometheus의 과거 기록도 지우지 않습니다. 초기화는 내구성 해결책이 아니라 반복 실험을 위한 정리입니다.</div>
+<label class="checkline"><input id="confirmStopped" type="checkbox">다른 터미널에서 보내는 요청을 중단했고, 위 범위의 실험 데이터를 백업 후 비우는 데 동의합니다.</label>
+<label for="resetPhrase" style="margin-top:16px">확인 문구: 4·5장 실험 초기화</label><input id="resetPhrase" autocomplete="off" placeholder="확인 문구를 그대로 입력">
+<div><button class="danger" id="resetButton" disabled>백업 후 이번 실험 초기화</button></div>
+<p id="resetError" class="notice error" hidden></p><small>도중 실패하면 백업·진행 기록을 보존하고 중단합니다. 오류를 확인하기 전 반복해서 누르지 마세요.</small>
+</details></section>
+<div class="foot">로컬 실습 전용 · 실시간 값과 저장된 결과를 구분합니다.<br>관찰용 조회도 작은 부하를 만듭니다. 짧은 예약 요청 실험은 처리량 벤치마크가 아닙니다. 같은 Wi-Fi 연결이 끊기면 마지막 값 대신 연결 상태를 확인하세요.</div>
+</main><div id="toast" hidden role="status"></div>
+<script>
+const role="__ROLE__", operator=role==="operator";
+let key=operator?"__OPERATOR_KEY__":new URLSearchParams(location.hash.slice(1)).get("key");
+let payload=null, current=null, session=null, live=false, share="", dirty=false, saving=false, lastSuccess=0;
+const $=id=>document.getElementById(id);
+const txt=(id,text)=>$(id).textContent=text;
+const show=(id,yes)=>$(id).hidden=!yes;
+function toast(text){txt("toast",text);show("toast",true);setTimeout(()=>show("toast",false),3500)}
+async function api(path,data){
+ const options={headers:{"Authorization":"Bearer "+(key||"")}};
+ if(data!==undefined){options.method="POST";options.headers["Content-Type"]="application/json";options.body=JSON.stringify(data)}
+ const res=await fetch(path,options);if(!res.ok){let e=await res.json();throw new Error(e.error||res.status)}return res;
+}
+async function post(path,data){await api(path,data);await poll()}
+function when(t){return t?new Date(t*1000).toLocaleTimeString("ko-KR",{hour12:false}):"—"}
+function val(n){return n==null?"—":Number(n).toLocaleString("ko-KR")}
+function safe(text){return String(text).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
+function readNotes(){return {step:current,operator:$("operatorPrediction").value,observer:$("observerPrediction").value,reflection:$("reflection").value}}
+async function save(){
+ if(!operator||!current)return;
+ saving=true;try{await api("/api/notes",readNotes());dirty=false;txt("noteStatus","저장됨 · 수정 이력도 원본에 남습니다.");toast("메모를 저장했어요")}finally{saving=false}
+}
+["operatorPrediction","observerPrediction","reflection"].forEach(id=>$(id).addEventListener("input",()=>{dirty=true;txt("noteStatus","아직 저장하지 않은 내용이 있어요.")}));
+window.addEventListener("beforeunload",e=>{if(dirty){e.preventDefault();e.returnValue=""}});
+function paintStep(step){
+ current=step.id;live=false;show("whyContent",false);txt("showWhy","확인 기준과 해설 열기");$("confirmCrash").checked=false;
+ $("dataDetails").open=["late","retry","async","crash"].includes(current);
+ ["group","title","situation","definition","question","does","command","expected","why","next"].forEach(id=>txt(id,step[id]||""));
+ ["goal","example","caution","transfer"].forEach(id=>txt(id,step[id]||""));
+ show("codeCard",!!step.codeAfter);["codeBefore","codeAfter","codeNotes","codeSource"].forEach(id=>txt(id,step[id]||""));
+ show("prepareCard",!!step.prepare);txt("prepareExpected",step.expected||"");
+ show("observeCard",!step.prepare);
+ show("whyCard",!step.prepare);
+ const pairs=rows=>(rows||[]).map(([label,body])=>'<li><strong>'+safe(label)+'</strong><p>'+safe(body)+'</p></li>').join("");
+ for(const id of ["terms","conditions"]){$(id).innerHTML=(step[id]||[]).map(([label,body])=>'<dt>'+safe(label)+'</dt><dd>'+safe(body)+'</dd>').join("")}
+ for(const id of ["flow","prompts","reading"]){$(id).innerHTML=pairs(step[id])}
+ $("reasoning").innerHTML=(step.reasoning||[]).map(body=>'<li><p>'+safe(body)+'</p></li>').join("");
+ show("lessonCard",!!step.goal);
+ $("watch").innerHTML=step.watch.map(w=>"<li>"+safe(w)+"</li>").join("");
+ const notes=payload.state.notes[current]||{};
+ $("operatorPrediction").value=notes.operator||"";$("observerPrediction").value=notes.observer||"";$("reflection").value=notes.reflection||"";
+ dirty=false;txt("noteStatus","실행 전에 두 사람의 예측을 저장해주세요.");
+ show("predictionCard",!!step.question);show("predictionInputs",operator);show("executeCard",operator);
+ $("operatorPrediction").placeholder=(step.prompts||[]).map(([label])=>label+"：예상 / 이유").join("\n")||"궁금한 점을 적어도 괜찮아요.";
+ $("observerPrediction").placeholder=$("operatorPrediction").placeholder;
+ show("confirmLine",!!step.danger);$("runButton").className=step.danger?"danger":"primary";
+ txt("executeBadge",step.prepare?"준비/정리 · 데이터 보존":step.codeAfter?"구현된 비교 코드 실행":"문제 상황 재현");
+ $("stepSelect").value=current;
+}
+function graph(history,series,title){
+ const w=720,h=145,pad=28;
+ const rows=history.slice(-90);let max=1;
+ rows.forEach(r=>series.forEach(s=>{if(r[s[0]]!=null)max=Math.max(max,r[s[0]])}));
+ max=Math.ceil(max);const span=Math.max(1,(rows.at(-1)?.at||0)-(rows[0]?.at||0));
+ const x=i=>pad+(w-pad*2)*(rows[i].at-(rows[0]?.at||0))/span;
+ const y=v=>h-pad-(h-pad*2)*v/max;
+ let paths="";
+ series.forEach(([name,label,color])=>{let d="",open=false;rows.forEach((r,i)=>{if(r[name]==null){open=false;return}d+=(open?" L":" M")+x(i).toFixed(1)+","+y(r[name]).toFixed(1);open=true});
+ paths+='<path d="'+d+'" fill="none" stroke="'+color+'" stroke-width="2.5" stroke-linecap="round"/>'});
+ return '<div class="chart"><h3>'+title+'</h3><div class="legend">'+series.map(([name,label,color])=>{const values=rows.map(r=>r[name]).filter(v=>v!=null);return '<span><i class="key" style="background:'+color+'"></i>'+label+' · 마지막 '+val(rows.at(-1)?.[name])+' / 관측 최대 '+val(values.length?Math.max(...values):null)+'</span>'}).join("")+'</div><svg viewBox="0 0 '+w+' '+h+'" role="img" aria-label="'+title+' 시간 변화. 결측 구간은 선이 끊어집니다."><line x1="'+pad+'" y1="'+(h-pad)+'" x2="'+(w-pad)+'" y2="'+(h-pad)+'" stroke="#c9d1d5"/><line x1="'+pad+'" y1="'+pad+'" x2="'+(w-pad)+'" y2="'+pad+'" stroke="#edf0f2"/><text x="3" y="'+(pad+5)+'" fill="#596872" font-size="12">'+max+'</text><text x="8" y="'+(h-pad+4)+'" fill="#596872" font-size="12">0</text>'+paths+'<text x="'+pad+'" y="'+(h-3)+'" fill="#596872" font-size="12">'+when(rows[0]?.at)+'</text><text x="'+(w-pad)+'" y="'+(h-3)+'" text-anchor="end" fill="#596872" font-size="12">'+when(rows.at(-1)?.at)+'</text></svg><small>단위: 개 · 실행 구간과 후속 관찰을 표시합니다. 관측 최대는 수집 사이에 놓친 순간 최대와 다를 수 있습니다.</small></div>';
+}
+function paintObservation(){
+ const state=payload.state, result=state.results[current], frozen=!!result&&!live&&!state.busy;
+ const snap=frozen?result.snapshot:payload.snapshot, history=frozen?result.history:payload.history;
+ const ids=frozen?result.focus:state.focus;
+ show("readingGuide",!!result);
+ txt("resultsTitle",state.busy?"실행 중 · 지금 변하는 값":result?"실제 실행 결과":"현재 상태 · 실행 대기");
+ txt("modeBadge",frozen?"종료 시점 기록":"실시간");
+ txt("resultContext",(frozen?"후속 관찰까지 마친 기록 · 실행 흐름 종료 "+when(result.requestsEnded)+" → 결과 고정":"지금 서비스에서 읽은 값")+" · "+when(snap.at)+" · 추적 대상 "+ids.length+"개");
+ txt("healthA","리뷰 A · "+(snap.aHealth?.status==="UP"?"정상":"확인 불가"));
+ txt("healthB","포인트 B · "+(snap.bHealth?.status==="UP"?"정상":"확인 불가"));
+ const f=snap.fault;txt("faultState",f&&f.beforeMs!=null?"B 지연: 저장 전 "+f.beforeMs+"ms / 응답 전 "+f.afterMs+"ms"+(f.fail?" / 오류 켜짐":""):"B 설정 확인 불가");
+ const relevant=(rows,field)=>Array.isArray(rows)?rows.filter(r=>ids.includes(r[field])):null;
+ const reviews=relevant(snap.reviews,"id"), grants=relevant(snap.grants,"review_id");
+ txt("reviewCount",ids.length?val(reviews?.length):"—");txt("grantCount",ids.length?val(grants?.length):"—");
+ txt("totalPoints",ids.length&&grants?val(grants.reduce((a,b)=>a+b.amount,0)):"—");
+ const worker=snap.worker;txt("workerState",worker?.active!=null?"A 작업자 · "+(worker.paused?"일시정지":"진행 가능")+" / 실행 중 "+worker.active+" / 대기열 "+worker.queued:"A 작업자 상태 확인 불가");
+ const lesson=payload.steps.find(s=>s.id===current), sol=snap.solutions, q=snap.queue;
+ const extended=!!lesson.extensionView;
+ document.querySelector('#observeCard .stats').hidden=extended;
+ show('workerState',!extended);show('dataDetails',!extended);show('extensionEvidence',extended);
+ const proof=r=>(r?.evidence||[]).filter(e=>e.extension).map(e=>'<div class="lesson-block"><h3>'+safe(e.operation)+'</h3><dl class="evidence-values">'+Object.entries(e.extension).map(([k,v])=>'<dt>'+safe(k)+'</dt><dd><strong>'+safe(String(v))+'</strong></dd>').join('')+'</dl><p class="muted">'+safe(e.detail||'')+'</p></div>').join('');
+ $('extensionEvidence').innerHTML=extended?(result?'<p class="notice">아래는 버튼 실행 도중 직접 조회해 저장한 단계별 증거입니다. 실시간 그래프가 아니며, 새로고침 시 값이 다시 계산되지 않습니다.</p>'+proof(result):'<p>실행 후 원본·대상·파일·로그 위치 또는 두 제공자 장부의 실측 증거가 여기에 표시됩니다. 다른 실험의 포인트 합계는 숨깁니다.</p>'):'';
+ const outbox=Array.isArray(sol?.outbox)?sol.outbox.filter(r=>ids.includes(r.review_id)):null;
+ $("solutionState").innerHTML=(current.startsWith("circuit")?'<h3>실제 회로 상태</h3><p>'+safe(sol?.breaker||"확인 불가")+' · CLOSED=허용 / OPEN=차단 / HALF_OPEN=시험 요청</p>':'')+
+   (["outbox_store","outbox_recover","broker_hold","broker_drain"].includes(current)?'<h3>전달 상태 · 지급과 구분해서 읽기</h3><p>아웃박스 WAITING '+val(outbox?.filter(r=>r.status==="WAITING").length)+' / DONE '+val(outbox?.filter(r=>r.status==="DONE").length)+' · 전달자 '+(sol?.relayPaused===true?'정지':sol?.relayPaused===false?'실행':'확인 불가')+'</p><p>RabbitMQ 큐 ready '+val(q?.ready)+' · 소비자 '+(q?.paused===true?'정지':q?.paused===false?'실행':'확인 불가')+'</p><small>큐 ready는 실습 큐 전체, 아웃박스는 이번 추적 ID만 셉니다. BROKER의 DONE은 브로커 전달 완료이지 지급 완료가 아닙니다.</small>':'');
+ const previous=state.results[lesson.compare];show("comparison",!!previous&&!!result);
+ if(previous&&result){
+   const summary=r=>{const focus=r.focus||[], a=r.snapshot.reviews, b=r.snapshot.grants;const writes=r.evidence.filter(e=>e.operation==="리뷰 작성"), reads=r.evidence.filter(e=>e.operation==="독립 리뷰 조회"&&e.ms!=null);const peak=k=>{const values=(r.history||[]).map(x=>x[k]).filter(x=>x!=null);return val(values.length?Math.max(...values):null)};return '리뷰 '+val(Array.isArray(a)?a.filter(x=>focus.includes(x.id)).length:null)+' · 지급 '+val(Array.isArray(b)?b.filter(x=>focus.includes(x.review_id)).length:null)+' · 작성 성공 '+writes.filter(x=>x.status===200).length+'/'+writes.length+(reads.length?'<br>독립 조회 최대 '+val(Math.max(...reads.map(x=>x.ms)))+'ms · HTTP 대기 관측 최대 '+peak('httpWait')+' / DB 점유 '+peak('dbUsed')+' / DB 대기 '+peak('dbWait'):'')};
+   $("comparison").innerHTML='<h3>이전 결과와 비교 · 각각의 실측 기록</h3><p><strong>'+safe(payload.steps.find(s=>s.id===lesson.compare)?.title||lesson.compare)+'</strong><br>'+summary(previous)+'</p><p><strong>이번 결과</strong><br>'+summary(result)+'</p><small>서로 다른 ID의 실험입니다. 아래 개별 데이터와 지연 조건도 함께 확인하세요.</small>';
+   if(extended) $('comparison').innerHTML='<details><summary>이전 단계의 실측 증거와 비교</summary>'+proof(previous)+'</details><p>현재 결과는 위 카드에 있습니다. 배치·CDC는 같은 데이터를 이어 처리하고, 이중화 비교는 설명에 따라 다른 ID 또는 앞의 safe ID를 사용합니다.</p>';
+ }
+ if(lesson.prepare) $("prepareEvidence").innerHTML=result?'<p>확인 시각 '+when(snap.at)+'</p><p>A '+safe(snap.aHealth?.status||'확인 불가')+' / B '+safe(snap.bHealth?.status||'확인 불가')+'</p><p>B 지연 '+val(snap.fault?.beforeMs)+' / '+val(snap.fault?.afterMs)+'ms · 오류 설정 '+safe(String(snap.fault?.fail??'확인 불가'))+' · B 실행 중(수집값) '+val(snap.metrics?.bActive)+'</p><p>메모리 작업 실행 '+val(worker?.active)+' / 대기 '+val(worker?.queued)+'</p><p>전달자 정지 '+safe(String(sol?.relayPaused??'확인 불가'))+' · 소비자 정지 '+safe(String(q?.paused??'확인 불가'))+' · 큐 ready '+val(q?.ready)+'</p><p>데이터·기존 기록은 삭제하지 않았습니다.</p><details><summary>설정 확인 원본</summary><pre class="raw">'+safe(JSON.stringify(result.evidence,null,2))+'</pre></details>':'버튼 실행 후 확인한 값이 표시됩니다.';
+ const errors=Object.keys(snap.errors||{});
+ show("snapshotWarning",errors.length>0);txt("snapshotWarning","수집하지 못한 항목: "+errors.join(", ")+". 이 값은 0이 아닙니다. 연결과 서비스 상태를 확인하세요.");
+ let html="";
+ if(result){
+  for(const operation of ["리뷰 작성","독립 리뷰 조회"]){
+   const rows=result.evidence.filter(r=>r.operation===operation);
+   if(rows.length){let ok=rows.filter(r=>r.status===200).length;let measured=rows.filter(r=>r.ms!=null).map(r=>r.ms).sort((a,b)=>a-b);
+   html+='<p><strong>'+operation+'</strong> · 성공 '+ok+' / HTTP 오류 '+rows.filter(r=>r.status!=null&&r.status!==200).length+' / 응답 미확인 '+rows.filter(r=>r.status==null).length+'<br><small>관측 소요시간: 최소 '+val(measured[0])+'ms · 최대 '+val(measured.at(-1))+'ms (오류/타임아웃 포함)</small></p>'}
+  }
+ }
+ $("responseSummary").innerHTML=html;
+ if(result&&current.startsWith("circuit")){
+   $("responseSummary").innerHTML+='<h3>호출별 회로 증거 · 직접 조회</h3><ol>'+result.evidence.filter(r=>r.solutionState||r.breaker||r.operation==="실제 B 수신 횟수").map(r=>'<li>'+safe(r.operation)+' · '+(r.solutionState?safe('HTTP '+r.status+' → '+r.solutionState.breaker):r.breaker?safe(r.breaker):val(r.count)+'회')+'</li>').join('')+'</ol>';
+ }
+ let charts="";
+ if(["ready","connections_fresh","connections","slow","outside","protected","restore"].includes(current)){
+ charts+=graph(history,[["httpUsed","HTTP 연결 사용 중","#285ccd"],["httpWait","HTTP 연결 획득 대기","#aa5920"]],"HTTP 풀 · "+val(snap.metrics?.httpMax)+"개 한도");
+ if(["slow","outside","protected","restore"].includes(current))charts+=graph(history,[["dbUsed","DB 연결 사용 중","#285ccd"],["dbWait","DB 연결 획득 대기","#aa5920"]],"DB 풀 · 외부 호출 중에도 점유되는가");
+ }else if(["async","crash"].includes(current)){
+ charts+=graph(history,[["asyncActive","작업자 실행 중","#285ccd"],["asyncQueued","메모리 대기열","#aa5920"]],"비동기 작업 · 재시작 전후 비교");
+ }
+ $("charts").innerHTML=charts;
+ $("dataTable").innerHTML=ids.length?'<table><thead><tr><th>reviewId</th><th>리뷰 저장</th><th>지급 건수</th><th>총액</th></tr></thead><tbody>'+ids.map(id=>{let gs=grants?.filter(r=>r.review_id===id);return '<tr><td>'+safe(id)+'</td><td>'+(reviews?(reviews.some(r=>r.id===id)?"있음":"없음"):"확인 불가")+'</td><td>'+val(gs?.length)+'</td><td>'+(gs?val(gs.reduce((a,b)=>a+b.amount,0)):"—")+'</td></tr>'}).join("")+'</tbody></table>':'<p class="muted">아직 추적할 리뷰가 없습니다. 첫 요청을 실행하면 표시됩니다.</p>';
+ show("connectionEvidence",["connections","connections_fresh"].includes(current)&&!!result);
+ const logs=result?.evidence.filter(r=>r.stdout).map(r=>r.stdout).join("\n")||"";
+ txt("connectionLog",logs.split("\n").filter(line=>ids.some(id=>line.includes(id))&&line.includes("remote=")).join("\n")||"해당 연결 로그를 찾지 못했습니다. 원본 로그를 확인하세요.");
+ txt("rawEvidence",result?JSON.stringify(result.evidence,null,2):state.busy?"명령 실행 중입니다. 완료하면 응답 원본을 표시합니다.":"아직 이 단계를 실행하지 않았습니다.");
+ show("toggleLive",!!result);txt("toggleLive",live?"종료 시점 기록으로 돌아가기":"실시간 상태로 전환");
+}
+function paint(){
+ if(!payload)return;
+ const state=payload.state;
+ if(!$('curriculum').childElementCount) $('curriculum').innerHTML=payload.steps.map(s=>'<li><strong>'+safe(s.title)+'</strong><p>'+safe(s.definition||s.goal||s.situation)+'</p></li>').join('');
+ if(current!==state.step||session!==state.session){session=state.session;paintStep(payload.steps.find(s=>s.id===state.step))}
+ txt("sessionId",state.session);
+ const step=payload.steps.find(s=>s.id===current), result=state.results[current];
+ $("runButton").disabled=state.busy||!!result;
+ txt("runButton",state.busy?"실행 중…":result?"이 단계 실행 완료":step.danger?"확인 후 A 강제 종료·재시작":"이 단계 실행");
+ txt("runStatus",result?"후속 관찰까지 저장했습니다. 실제 데이터로 확인하세요.":state.busy?(state.phase||"실행 중 · 친구는 관찰 화면의 변화를 봐주세요."):step.question?"예측을 저장한 뒤 실행하세요.":"준비 목적과 완료 기준을 읽고 실행하세요.");
+ show("actionError",!!state.error);txt("actionError",state.error);
+ $("showWhy").disabled=!result;
+ show("reflectionBox",operator&&!!result&&!step.prepare);
+ $("stepSelect").disabled=state.busy;$("newSession").disabled=state.busy;
+ updateResetButton();
+ const resetFailed=state.error?.startsWith("초기화 중단:");
+ show("resetNotice",!!state.resetting||!!state.lastReset||resetFailed);
+ txt("resetNotice",state.resetting?"이번 실험 초기화 중 · A·B 중지 → 백업 → 전용 데이터 비우기 → 재시작. 완료될 때까지 기다려주세요.":resetFailed?state.error:state.lastReset?"초기화 완료 · 새 세션에서 시작하세요. 이전 기록은 보존했습니다. DB 백업: "+state.lastReset.backup:"");
+ const index=payload.steps.findIndex(s=>s.id===current);
+ $("previous").disabled=state.busy||index===0;
+ $("nextStep").disabled=state.busy||index===payload.steps.length-1||!result;
+ paintObservation();
+}
+async function poll(){
+ try{
+  const res=await api("/api/state");payload=await res.json();lastSuccess=Date.now();show("fatal",false);
+  txt("connection","화면 연결 정상 · "+when(payload.snapshot.at));
+  if(!current){$("stepSelect").innerHTML=payload.steps.map((s,i)=>'<option value="'+s.id+'">'+String(i+1).padStart(2,"0")+' · '+safe(s.title)+'</option>').join("")}
+  paint();
+ }catch(e){
+  txt("connection","화면 연결 끊김");show("fatal",true);txt("fatal",e.message+" · 표시된 값은 마지막 수신 기록이며 현재 값이 아닙니다.");
+  $("runButton").disabled=true;
+ }
+}
+async function select(step){
+ if(dirty)await save();
+ await post("/api/select",{step});window.scrollTo({top:0,behavior:"instant"});
+}
+$("stepSelect").onchange=()=>select($("stepSelect").value).catch(e=>toast(e.message));
+$("saveNotes").onclick=()=>save().catch(e=>toast(e.message));$("saveReflection").onclick=$("saveNotes").onclick;
+$("runButton").onclick=async()=>{
+ try{
+  if(dirty)await save();
+  const s=payload.steps.find(s=>s.id===current);
+  if(s.danger&&!$("confirmCrash").checked){toast("강제 종료 확인란을 먼저 체크해주세요.");return}
+  await post("/api/run",{step:current,confirm:$("confirmCrash").checked});
+ }catch(e){show("actionError",true);txt("actionError",e.message)}
+};
+$("showWhy").onclick=()=>{show("whyContent",$("whyContent").hidden);txt("showWhy",$("whyContent").hidden?"확인 기준과 해설 열기":"해설 접기")};
+$("toggleLive").onclick=()=>{live=!live;paintObservation()};
+async function copy(text){
+ try{await navigator.clipboard.writeText(text);toast("복사했어요")}catch(e){toast("자동 복사를 사용할 수 없어요. 표시된 텍스트를 선택해 복사해주세요.")}
+}
+$("copyCommand").onclick=()=>copy($("command").textContent);
+$("shareButton").onclick=async()=>{try{const d=await (await api("/api/share")).json();share="http://"+d.addresses[0]+":8091/#key="+d.key;txt("shareUrl",share);show("shareBox",$("shareBox").hidden)}catch(e){toast(e.message)}};
+$("copyShare").onclick=()=>copy(share);
+$("previous").onclick=()=>{const i=payload.steps.findIndex(s=>s.id===current);select(payload.steps[i-1].id).catch(e=>toast(e.message))};
+$("nextStep").onclick=()=>{const i=payload.steps.findIndex(s=>s.id===current);select(payload.steps[i+1].id).catch(e=>toast(e.message))};
+$("download").onclick=async()=>{try{if(operator&&dirty)await save();const blob=await (await api("/api/export")).blob();const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download=(session||"session")+".jsonl";a.click();setTimeout(()=>URL.revokeObjectURL(url),1000)}catch(e){toast(e.message)}};
+$("newSession").onclick=async()=>{if(!confirm("이전 기록과 DB는 보존하고 새 세션을 시작할까요? 작업이 일시정지 중이면 먼저 마무리 단계로 복구하세요."))return;try{if(dirty)await save();await post("/api/new",{});toast("새 세션을 시작했어요")}catch(e){toast(e.message)}};
+function updateResetButton(){$("resetButton").disabled=!operator||!payload||payload.state.busy||!$("confirmStopped").checked||$("resetPhrase").value!=="4·5장 실험 초기화"}
+$("confirmStopped").onchange=updateResetButton;$("resetPhrase").oninput=updateResetButton;
+$("resetButton").onclick=async()=>{
+ if($("resetButton").disabled)return;
+ try{if(dirty)await save();show("resetError",false);await post("/api/reset",{confirmation:$("resetPhrase").value});$("resetPhrase").value="";$("confirmStopped").checked=false;updateResetButton();window.scrollTo({top:0,behavior:"instant"})}
+ catch(e){txt("resetError",e.message);show("resetError",true)}
+};
+txt("roleLabel",operator?"실행자 · 진행/기록":"관찰자 · 읽기 전용");
+show("operatorNav",operator);show("observerIntro",!operator);show("newSession",operator);show("bottomNav",operator);show("resetCard",operator);
+if(!operator&&!key){show("fatal",true);txt("fatal","접속 키가 없습니다. 실행자에게 ‘친구 접속 주소’를 받아 전체 주소로 다시 열어주세요.");txt("connection","접속 키 필요")}
+else{poll();setInterval(poll,1500)}
+</script></body></html>

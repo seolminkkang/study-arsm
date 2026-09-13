@@ -1,0 +1,1136 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" href="data:,">
+  <title>외부 연동과 비동기 — 4·5장 인터랙티브 학습</title>
+  <style>
+    :root {
+      --ink: #17202a;
+      --muted: #586576;
+      --paper: #f7f4ee;
+      --card: #fffdf8;
+      --line: #d7d3ca;
+      --blue: #2d63c8;
+      --blue-soft: #e8efff;
+      --green: #167a5a;
+      --green-soft: #e4f5ee;
+      --amber: #a25e00;
+      --amber-soft: #fff0cf;
+      --red: #b7323f;
+      --red-soft: #ffe7e8;
+      --violet: #6d4fc2;
+      --violet-soft: #eee9ff;
+      --shadow: 0 12px 35px rgba(25, 35, 45, .08);
+      --radius: 22px;
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at 10% 0%, rgba(45,99,200,.08), transparent 30rem),
+        radial-gradient(circle at 95% 20%, rgba(22,122,90,.07), transparent 32rem),
+        var(--paper);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans KR", sans-serif;
+      line-height: 1.68;
+    }
+    a { color: var(--blue); }
+    button, input, textarea { font: inherit; }
+    button, input[type="range"] { cursor: pointer; }
+    button:focus-visible, input:focus-visible, textarea:focus-visible, a:focus-visible {
+      outline: 3px solid #ffbf47;
+      outline-offset: 3px;
+    }
+    .shell { width: min(1180px, calc(100% - 32px)); margin: 0 auto; }
+    .topbar {
+      position: sticky; top: 0; z-index: 20;
+      backdrop-filter: blur(16px);
+      background: rgba(247,244,238,.88);
+      border-bottom: 1px solid rgba(50,60,70,.12);
+    }
+    .topbar .shell { min-height: 64px; display: flex; align-items: center; gap: 18px; min-width: 0; overflow: hidden; }
+    .brand { font-weight: 850; letter-spacing: -.03em; white-space: nowrap; }
+    .brand span { color: var(--blue); }
+    nav { display: flex; flex: 1; min-width: 0; gap: 6px; overflow-x: auto; padding: 8px 0; scrollbar-width: none; }
+    nav a { color: var(--muted); text-decoration: none; font-size: .88rem; font-weight: 700; padding: 7px 10px; border-radius: 999px; white-space: nowrap; }
+    nav a:hover { background: #fff; color: var(--ink); }
+    .hero { padding: 72px 0 40px; }
+    .eyebrow { color: var(--blue); font-weight: 850; letter-spacing: .08em; font-size: .78rem; text-transform: uppercase; }
+    h1 { font-size: clamp(2.4rem, 7vw, 5.4rem); line-height: 1.02; letter-spacing: -.065em; margin: 12px 0 24px; max-width: 930px; }
+    .lead { font-size: clamp(1.06rem, 2vw, 1.35rem); color: var(--muted); max-width: 800px; }
+    .hero-grid { display: grid; grid-template-columns: 1.1fr .9fr; gap: 24px; align-items: start; margin-top: 38px; }
+    .card { min-width: 0; background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); padding: clamp(20px, 4vw, 34px); }
+    .route { display: grid; grid-template-columns: 1fr auto 1fr auto 1fr; align-items: center; gap: 12px; min-height: 150px; }
+    .node { border: 2px solid var(--ink); background: white; border-radius: 16px; min-height: 88px; padding: 14px; display: grid; place-items: center; text-align: center; font-weight: 800; position: relative; }
+    .node small { display: block; color: var(--muted); font-weight: 600; }
+    .arrow { font-size: 1.8rem; color: var(--blue); font-weight: 900; }
+    .pulse { width: 14px; height: 14px; border-radius: 50%; background: var(--blue); position: absolute; right: -20px; top: 50%; transform: translateY(-50%); animation: pulse 1.2s infinite alternate; }
+    @keyframes pulse { to { transform: translate(18px,-50%); opacity: .25; } }
+    .mode-buttons, .segmented { display: flex; gap: 8px; flex-wrap: wrap; margin: 18px 0; }
+    .mode-buttons button, .segmented button, .soft-button {
+      border: 1px solid var(--line); background: #fff; color: var(--ink); border-radius: 999px; padding: 9px 14px; font-weight: 800;
+    }
+    .mode-buttons button.active, .segmented button.active { background: var(--ink); color: white; border-color: var(--ink); }
+    .callout { border-left: 5px solid var(--blue); background: var(--blue-soft); padding: 14px 16px; border-radius: 8px 16px 16px 8px; }
+    .callout strong { display: block; margin-bottom: 4px; }
+    .callout.warn { border-color: var(--amber); background: var(--amber-soft); }
+    .callout.danger { border-color: var(--red); background: var(--red-soft); }
+    .callout.good { border-color: var(--green); background: var(--green-soft); }
+    .lesson-copy { margin-bottom: 22px; box-shadow: none; }
+    .lesson-copy::before { content: "1 · 먼저 읽기 — 개념 설명"; display: inline-block; margin-bottom: 14px; color: var(--blue); font-size: .76rem; font-weight: 900; letter-spacing: .08em; text-transform: uppercase; }
+    .lesson-copy > p:first-of-type { font-size: 1.08rem; }
+    .lesson-copy p { max-width: 88ch; }
+    .lesson-copy p:last-child { margin-bottom: 0; }
+    .storyline { counter-reset: story; display: grid; gap: 12px; margin: 18px 0; padding: 0; list-style: none; }
+    .storyline li { counter-increment: story; display: grid; grid-template-columns: 36px 1fr; gap: 12px; align-items: start; }
+    .storyline li::before { content: counter(story); width: 30px; height: 30px; display: grid; place-items: center; border-radius: 50%; background: var(--ink); color: white; font-weight: 900; font-size: .78rem; }
+    .concept-grid { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 12px; margin: 18px 0; }
+    .concept { border: 1px solid var(--line); background: #fff; border-radius: 14px; padding: 14px; }
+    .concept b { display: block; margin-bottom: 5px; }
+    .term { color: var(--violet); font-weight: 850; }
+    .micro-summary { margin: 18px 0 0; border-top: 1px solid var(--line); padding-top: 14px; font-weight: 750; }
+    .reading-guide { display: grid; grid-template-columns: auto 1fr; gap: 8px 12px; align-items: start; margin: 16px 0; }
+    .reading-guide b { color: var(--blue); }
+    .lab-intro { margin: 28px 0 14px; border: 1px solid #b9caef; background: linear-gradient(135deg,#eef4ff,#fff); border-radius: 16px; padding: 16px 18px; }
+    .lab-intro .lab-label { display: block; color: var(--blue); font-size: .76rem; font-weight: 900; letter-spacing: .08em; margin-bottom: 6px; }
+    .lab-intro b { display: block; font-size: 1.06rem; margin-bottom: 5px; }
+    .lab-intro p { margin: 0; color: var(--muted); }
+    .lab-intro .observe { margin-top: 7px; color: var(--ink); font-weight: 700; }
+    .legend { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 18px; }
+    .badge { font-size: .69rem; letter-spacing: .06em; font-weight: 900; border-radius: 7px; padding: 4px 7px; display: inline-block; vertical-align: middle; }
+    .book { color: #244d99; background: var(--blue-soft); }
+    .bridge { color: #7a4700; background: var(--amber-soft); }
+    .deep { color: #5737a6; background: var(--violet-soft); }
+    .lab { color: #075e41; background: var(--green-soft); }
+    main section { scroll-margin-top: 82px; padding: 52px 0; }
+    .section-head { display: grid; grid-template-columns: minmax(0,1fr) minmax(240px,.55fr); gap: 24px; align-items: end; margin-bottom: 28px; }
+    .section-head h2 { font-size: clamp(2rem, 5vw, 3.8rem); line-height: 1.08; letter-spacing: -.055em; margin: 8px 0; }
+    .section-head p { color: var(--muted); margin: 0; }
+    h3 { font-size: clamp(1.35rem, 3vw, 2rem); line-height: 1.25; letter-spacing: -.035em; margin: 0 0 16px; }
+    h4 { margin: 22px 0 8px; font-size: 1.05rem; }
+    .grid-2 { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 22px; }
+    .grid-3 { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 18px; }
+    .grid-2 > *, .grid-3 > * { min-width: 0; }
+    .stack { display: grid; gap: 22px; }
+    .control-grid { display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: 16px; }
+    .control { background: #fff; border: 1px solid var(--line); padding: 13px; border-radius: 14px; }
+    .control label { display: flex; justify-content: space-between; gap: 8px; font-weight: 800; font-size: .88rem; }
+    .control output { color: var(--blue); }
+    input[type="range"] { width: 100%; accent-color: var(--blue); }
+    .metric-grid { display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: 12px; margin-top: 18px; }
+    .metric { border: 1px solid var(--line); background: #fff; padding: 13px; border-radius: 14px; min-height: 100px; }
+    .metric b { display: block; font-size: clamp(1.5rem, 3vw, 2.25rem); letter-spacing: -.045em; }
+    .metric span { color: var(--muted); font-size: .82rem; }
+    .meter { height: 10px; background: #e7e4dd; border-radius: 99px; overflow: hidden; margin-top: 10px; }
+    .meter i { display: block; height: 100%; width: 0; background: var(--green); border-radius: inherit; transition: width .25s, background .25s; }
+    .explain { margin-top: 16px; color: var(--muted); }
+    .pool-scene { display: grid; grid-template-columns: 1fr auto 1.2fr auto 1fr; gap: 14px; align-items: center; min-height: 230px; }
+    .request-stack, .pool-box { border: 1px dashed #9ba4af; border-radius: 16px; padding: 14px; min-height: 150px; }
+    .request-dot { width: 100%; height: 13px; border-radius: 99px; background: var(--blue-soft); border: 1px solid #b8c9ee; margin: 7px 0; }
+    .request-dot.wait { background: var(--amber-soft); border-color: #d8a956; }
+    .connection-slots { display: grid; grid-template-columns: repeat(4, minmax(42px,1fr)); gap: 8px; }
+    .slot { min-height: 54px; display: grid; place-items: center; border: 2px solid #a8b0ba; border-radius: 10px; font-size: .72rem; font-weight: 850; background: #fff; text-align: center; }
+    .slot.busy { background: var(--blue-soft); border-color: var(--blue); color: #173b82; }
+    .slot.idle { background: var(--green-soft); border-color: var(--green); color: #0d5f44; }
+    .timeline { display: grid; gap: 10px; margin: 20px 0; }
+    .phase { display: grid; grid-template-columns: 150px 1fr 78px; gap: 12px; align-items: center; }
+    .phase-bar { height: 22px; background: #e9e6df; border-radius: 7px; overflow: hidden; }
+    .phase-bar span { display: block; height: 100%; min-width: 3px; border-radius: inherit; transition: width .25s; }
+    .phase:nth-child(1) .phase-bar span { background: var(--amber); }
+    .phase:nth-child(2) .phase-bar span { background: var(--blue); }
+    .phase:nth-child(3) .phase-bar span { background: var(--violet); }
+    .phase:nth-child(4) .phase-bar span { background: var(--green); }
+    .timeout-flag { padding: 12px; border-radius: 12px; background: var(--green-soft); color: var(--green); font-weight: 850; }
+    .timeout-flag.failed { background: var(--red-soft); color: var(--red); }
+    .retry-track { min-height: 165px; position: relative; border-bottom: 2px solid #b7bec8; margin: 18px 0 8px; overflow: hidden; }
+    .attempt { position: absolute; bottom: 14px; width: 42px; height: 42px; border-radius: 50%; display: grid; place-items: center; background: var(--red-soft); border: 2px solid var(--red); font-weight: 900; transition: left .3s; }
+    .attempt.ok { background: var(--green-soft); border-color: var(--green); }
+    .patterns .card { box-shadow: none; }
+    .state-machine { display: grid; grid-template-columns: repeat(3,1fr); gap: 12px; margin: 20px 0; }
+    .state { padding: 18px 10px; border: 2px solid #adb5bf; background: #fff; border-radius: 14px; text-align: center; font-weight: 900; }
+    .state.active { border-color: var(--red); background: var(--red-soft); }
+    .state.active.closed { border-color: var(--green); background: var(--green-soft); }
+    .state.active.half { border-color: var(--amber); background: var(--amber-soft); }
+    .circuit-meaning { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 9px; margin: 14px 0 18px; }
+    .circuit-meaning div { border: 1px solid var(--line); border-radius: 12px; padding: 11px; font-size: .86rem; }
+    .circuit-meaning b { display: block; margin-bottom: 3px; }
+    .circuit-guide { border: 2px solid #b9caef; background: var(--blue-soft); border-radius: 14px; padding: 14px; margin: 16px 0; }
+    .circuit-guide b { display: block; margin-bottom: 5px; }
+    .circuit-observation { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 8px; margin: 14px 0; }
+    .circuit-observation div { background: #fff; border: 1px solid var(--line); border-radius: 11px; padding: 10px; font-size: .82rem; }
+    .circuit-observation span { display: block; color: var(--muted); margin-bottom: 3px; }
+    .failure-buttons { display: flex; gap: 8px; flex-wrap: wrap; }
+    .failure-buttons button { border: 1px solid var(--line); background: #fff; border-radius: 12px; padding: 10px 12px; font-weight: 800; }
+    .sequence { display: grid; grid-template-columns: repeat(5,1fr); gap: 10px; align-items: stretch; margin: 18px 0; }
+    .step { min-width: 0; overflow-wrap: anywhere; border: 2px solid #b8bec8; background: #fff; border-radius: 14px; padding: 14px 10px; min-height: 96px; display: grid; place-items: center; text-align: center; font-weight: 800; position: relative; }
+    .step.active { border-color: var(--blue); background: var(--blue-soft); }
+    .step.failed { border-color: var(--red); background: var(--red-soft); }
+    .step.done { border-color: var(--green); background: var(--green-soft); }
+    .compare-table { width: 100%; border-collapse: collapse; font-size: .92rem; }
+    .compare-table th, .compare-table td { text-align: left; padding: 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+    .compare-table th { color: var(--muted); font-size: .78rem; letter-spacing: .04em; text-transform: uppercase; }
+    .broker { display: grid; grid-template-columns: 1fr auto 1.35fr auto 1fr; gap: 14px; align-items: center; }
+    .queue { border: 2px solid var(--violet); background: var(--violet-soft); padding: 14px; border-radius: 15px; display: flex; gap: 5px; min-height: 82px; align-items: end; overflow: hidden; }
+    .message { flex: 0 0 18px; height: 38px; background: var(--violet); border-radius: 4px; }
+    .message.duplicate { background: repeating-linear-gradient(45deg,var(--red),var(--red) 4px,#fff 4px,#fff 7px); border: 1px solid var(--red); }
+    .ledger { background: #fff; border: 1px solid var(--line); border-radius: 14px; padding: 14px; min-height: 110px; }
+    .ledger-row { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px dashed var(--line); }
+    .outbox-table { display: block; width: 100%; overflow-x: auto; border-collapse: collapse; font-size: .86rem; }
+    .outbox-table th, .outbox-table td { padding: 9px; border: 1px solid var(--line); text-align: left; }
+    .outbox-table tr.current { background: var(--blue-soft); }
+    details { border: 1px solid var(--line); border-radius: 14px; background: #fff; padding: 13px 16px; }
+    details + details { margin-top: 10px; }
+    summary { cursor: pointer; font-weight: 850; }
+    .prediction { margin-top: 18px; border: 2px dashed var(--amber); background: #fffaf0; border-radius: 16px; padding: 16px; }
+    .prediction label { font-weight: 850; display: block; }
+    .prediction textarea { margin-top: 8px; width: 100%; min-height: 72px; resize: vertical; border: 1px solid #c9b587; border-radius: 10px; padding: 10px; background: white; }
+    .reset-row { display: flex; justify-content: flex-end; margin: 18px 0; }
+    .reset { border: 1px solid var(--line); background: #fff; border-radius: 999px; padding: 9px 14px; font-weight: 800; }
+    .source-list { columns: 2; column-gap: 28px; }
+    .source-list li { break-inside: avoid; margin-bottom: 9px; }
+    footer { padding: 50px 0 80px; color: var(--muted); }
+    .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); border: 0; }
+    @media (max-width: 850px) {
+      .hero-grid, .section-head, .grid-2, .grid-3, .concept-grid { grid-template-columns: 1fr; }
+      .control-grid, .metric-grid { grid-template-columns: repeat(2, minmax(0,1fr)); }
+      .pool-scene, .broker { grid-template-columns: 1fr; }
+      .pool-scene .arrow, .broker .arrow { transform: rotate(90deg); text-align: center; }
+      .sequence { grid-template-columns: 1fr; }
+      .phase { grid-template-columns: 100px 1fr 64px; }
+      .route { grid-template-columns: 1fr; }
+      .route .arrow { transform: rotate(90deg); text-align: center; }
+      .pulse { display: none; }
+      .source-list { columns: 1; }
+    }
+    @media (max-width: 520px) {
+      .shell { width: min(100% - 20px, 1180px); }
+      .hero { padding-top: 46px; }
+      .card { border-radius: 17px; padding: 18px; }
+      .control-grid, .metric-grid { grid-template-columns: 1fr; }
+      .state-machine { grid-template-columns: 1fr; }
+      .circuit-meaning, .circuit-observation { grid-template-columns: 1fr; }
+      .phase { grid-template-columns: 1fr; gap: 5px; }
+      .compare-table { font-size: .78rem; }
+      .compare-table th, .compare-table td { padding: 8px; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      html { scroll-behavior: auto; }
+      *, *::before, *::after { animation: none !important; transition: none !important; }
+    }
+    /* Original reading flow: modest spacing and bounded diagrams. */
+    body { font-size:17px; line-height:1.85; }
+    h3 { line-height:1.4; font-size:clamp(1.35rem,2.5vw,1.8rem); }
+    .card { padding:clamp(22px,3vw,36px); }
+    .lesson-copy p { max-width:76ch; margin:22px 0; }
+    .lesson-copy h3:not(:first-child), .lesson-copy h4 { margin-top:36px; }
+    .lesson-copy > p:first-of-type { font-size:1.12rem; }
+    .concept { padding:20px; }
+    .concept-grid, .grid-2, .grid-3, .stack { gap:26px; }
+    .callout { padding:20px 22px; margin-top:22px; }
+    .micro-summary { margin-top:30px; padding:22px; border:0; border-left:4px solid var(--blue); border-radius:8px; background:var(--blue-soft); }
+    .lab-intro { margin:40px 0 22px; padding:22px 26px; }
+    .lab-intro .observe { margin-top:14px; }
+    .explain { margin-top:24px; }
+    .storyline { gap:20px; margin:26px 0; }
+    .control label { font-size:.95rem; }
+    .control, .metric { padding:16px; }
+    .broker { grid-template-columns:minmax(90px,1fr) 24px minmax(0,2fr) 24px minmax(90px,1fr); }
+    .broker > *, .pool-scene > * { min-width:0; }
+    .queue { min-width:0; max-width:100%; flex-wrap:wrap; max-height:140px; align-content:center; }
+    #messaging .grid-2:has(.broker) { grid-template-columns:1fr; }
+    .ledger-row { gap:16px; flex-wrap:wrap; }
+    .node { word-break:keep-all; }
+    .circuit-meaning div, .circuit-observation div { padding:14px; font-size:.94rem; }
+    @media(max-width:1050px) { .grid-2:has(.state-machine), .grid-2:has(.pool-scene) { grid-template-columns:1fr; } }
+    @media(max-width:850px) { .broker { grid-template-columns:minmax(0,1fr); } }
+    @media(max-width:520px) { body { font-size:16px; } .card { padding:22px; } .lab-intro { padding:18px; } }
+    /* Definition → summary → short explanation → example → full-width lab. */
+    .topic-primer { max-width:900px; margin:0 auto 28px; }
+    .topic-primer h3 { font-size:1.05rem; margin:0 0 14px; color:var(--blue); }
+    .term-list { margin:0; padding:0; }
+    .term-list > div { display:grid; grid-template-columns:155px minmax(0,1fr); gap:16px; padding:14px 0; border-bottom:1px solid var(--line); }
+    .term-list dt { font-weight:850; }
+    .term-list dd { margin:0; }
+    .topic-tldr { margin:24px 0 0; padding:20px 24px; border-left:4px solid var(--blue); background:var(--blue-soft); border-radius:10px; }
+    .topic-tldr p { margin:0; max-width:64ch; font-weight:750; }
+    .lesson-copy { max-width:900px; margin:0 auto 28px; }
+    .lesson-copy::before { content:'03 · 설명 — 무엇이고, 왜 필요한가'; }
+    .lesson-copy > p, .lesson-copy > ul, .lesson-copy > ol, .lesson-copy > .reading-guide { max-width:64ch; }
+    .explanation-points { padding-left:24px; margin:18px 0 28px; }
+    .explanation-points li + li { margin-top:13px; }
+    .example-box { max-width:900px; margin:30px auto; background:#fff8eb; border:1px solid #e5d4b4; border-radius:16px; padding:26px 32px; }
+    .example-box h3 { font-size:1.12rem; color:#805000; }
+    .example-box p { max-width:64ch; margin:14px 0; }
+    .example-box p:last-child { padding-top:14px; border-top:1px solid #e5d4b4; font-size:.95rem; }
+    .hero-grid:has(button), .grid-2:has(button, input, textarea), .grid-3:has(button, input, textarea) { grid-template-columns:minmax(0,1fr); }
+    .lab-intro { margin-top:44px; border-top:3px solid var(--blue); }
+    .lab-intro + .hero-grid { margin-top:0; }
+    @media(max-width:650px) { .term-list > div { grid-template-columns:1fr; gap:4px; } .example-box { padding:22px; } .lesson-copy .concept-grid { grid-template-columns:1fr; } }
+    /* One consistent reading column, including headings and interactive content. */
+    .shell { width:min(900px,calc(100% - 40px)); }
+    .hero { padding:48px 0 24px; }
+    h1 { font-size:clamp(28px,4vw,42px); line-height:1.35; letter-spacing:-.035em; max-width:100%; }
+    .lead { font-size:18px; max-width:100%; }
+    main section { padding:36px 0; }
+    .section-head { display:block; margin-bottom:24px; }
+    .section-head h2 { font-size:clamp(25px,3vw,34px); line-height:1.4; letter-spacing:-.035em; margin:10px 0 14px; }
+    .section-head p { font-size:15px; line-height:1.85; }
+    h3 { font-size:clamp(20px,2.4vw,25px); line-height:1.5; letter-spacing:-.02em; }
+    h4 { font-size:18px; line-height:1.6; }
+    h1,h2,h3,h4 { word-break:keep-all; overflow-wrap:anywhere; }
+    .card,.topic-primer,.lesson-copy,.example-box,.lab-intro { width:100%; max-width:100%; }
+    .card,.example-box,.lab-intro { padding:28px; }
+    .hero-grid,.grid-2,.grid-3,.concept-grid,.route,.pool-scene,.broker,.sequence,.state-machine,.circuit-meaning,.circuit-observation { grid-template-columns:minmax(0,1fr); }
+    .route,.pool-scene,.broker { gap:12px; margin:24px 0; min-height:0; }
+    .route .arrow,.pool-scene .arrow,.broker .arrow { transform:rotate(90deg); text-align:center; line-height:1; font-size:24px; }
+    .node { min-height:74px; padding:16px; font-size:18px; }
+    .pulse { display:none; }
+    .pool-scene h4 { margin:0 0 10px; }
+    .request-stack,.pool-box { min-height:0; }
+    .connection-slots { grid-template-columns:repeat(auto-fit,minmax(64px,1fr)); }
+    .sequence { counter-reset:stage; gap:12px; }
+    .step { counter-increment:stage; display:flex; gap:14px; justify-content:flex-start; text-align:left; min-height:64px; padding:14px 18px; font-size:17px; }
+    .step::before { content:counter(stage); display:grid; place-items:center; flex:0 0 28px; height:28px; border-radius:50%; background:var(--ink); color:white; font-size:14px; }
+    .state { padding:14px 18px; font-size:17px; text-align:left; }
+    .state small { font-size:15px; }
+    .circuit-observation > div { display:flex; flex-wrap:wrap; justify-content:space-between; gap:12px; }
+    .control-grid { grid-template-columns:repeat(2,minmax(0,1fr))!important; }
+    .metric-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+    .metric b { font-size:28px; line-height:1.5; }
+    .mode-buttons,.segmented,.failure-buttons { display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:10px; }
+    .mode-buttons button,.segmented button,.failure-buttons button { border-radius:12px; min-height:46px; padding:10px 14px; font-size:15px; white-space:normal; overflow-wrap:anywhere; }
+    .reading-guide { grid-template-columns:minmax(0,1fr); gap:6px; }
+    .reading-guide b:not(:first-child) { margin-top:14px; }
+    .comparison-list { display:grid; gap:24px; }
+    .comparison-item { border-bottom:1px solid var(--line); padding-bottom:22px; }
+    .comparison-item:last-child { border-bottom:0; padding-bottom:0; }
+    .comparison-item h4 { margin:0 0 12px; color:var(--blue); }
+    .record-fields { margin:0; }
+    .record-fields > div { display:grid; grid-template-columns:140px minmax(0,1fr); gap:16px; padding:12px 0; border-bottom:1px solid var(--line); }
+    .record-fields dt { font-weight:750; color:var(--muted); }
+    .record-fields dd { margin:0; overflow-wrap:anywhere; }
+    .source-list { columns:1; }
+    .callout,.explain,li,dd { overflow-wrap:anywhere; }
+    @media(max-width:600px) {
+      .shell { width:calc(100% - 24px); }
+      .card,.example-box,.lab-intro { padding:22px; }
+      .control-grid,.metric-grid { grid-template-columns:minmax(0,1fr)!important; }
+      .phase { grid-template-columns:minmax(0,1fr); gap:6px; padding-bottom:14px; border-bottom:1px solid var(--line); }
+      .record-fields > div { grid-template-columns:minmax(0,1fr); gap:4px; }
+      .term-list > div { grid-template-columns:minmax(0,1fr); }
+      .topbar .shell { display:block; padding-top:8px; }
+      main section { scroll-margin-top:115px; }
+    }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="shell">
+      <div class="brand"><span>04→05</span> 연동의 경계</div>
+      <nav aria-label="학습 목차">
+        <a href="#map">전체 지도</a>
+        <a href="#saturation">느린 연동</a>
+        <a href="#timeouts">타임아웃</a>
+        <a href="#pool">HTTP 풀</a>
+        <a href="#resilience">복원력</a>
+        <a href="#consistency">일관성</a>
+        <a href="#async">비동기</a>
+        <a href="#messaging">메시징</a>
+        <a href="#outbox">아웃박스·CDC</a>
+      </nav>
+    </div>
+  </header>
+
+  <div class="shell hero">
+    <div class="eyebrow">주니어 백엔드 실무 지식 · 4장 + 5장</div>
+    <h1>기다림을 제한하고,<br>실패가 머무를 곳을 설계한다.</h1>
+    <p class="lead">외부 서비스가 느려졌을 때 왜 우리 서비스까지 멈추는지부터, 동기 호출을 메시지로 분리한 뒤 새로 생기는 유실·중복·일관성 문제까지 하나의 주문 시나리오로 따라갑니다.</p>
+    <div class="legend" aria-label="설명 깊이 범례">
+      <span class="badge book">BOOK 교재 핵심</span>
+      <span class="badge bridge">BRIDGE 연결 지식</span>
+      <span class="badge deep">DEEP 심화</span>
+      <span class="badge lab">LAB 관찰</span>
+    </div>
+  </div>
+
+  <main>
+    <section id="map">
+      <div class="shell">
+        <div class="section-head">
+          <div><div class="eyebrow">01 · Mental map</div><h2>같은 주문, 세 가지 연결 방식</h2></div>
+          <p>먼저 요청 하나가 어디에서 기다리고, 누가 실패를 처리하며, 작업이 어디에 남는지 비교합니다.</p>
+        </div>
+        <aside class="card topic-primer" aria-label="단어 정의와 요약"><h3>01 · 단어 정의</h3><dl class="term-list"><div><dt>동기 연동</dt><dd>상대의 완료 결과를 기다린 뒤 현재 흐름을 진행하는 방식</dd></div><div><dt>비동기 연동</dt><dd>작업을 맡기고 완료 확인은 나중에 다루는 방식</dd></div><div><dt>외부 의존성</dt><dd>우리 기능이 동작하려고 호출하는 다른 서비스</dd></div></dl><div class="topic-tldr"><h3>02 · 핵심 요약</h3><p>4장은 기다리는 동안 우리 서비스를 보호하고, 5장은 기다림과 복구 책임을 다른 시간과 장소로 옮깁니다.</p></div></aside>
+        <div class="card lesson-copy">
+          <h3>왜 4장과 5장을 같이 보나?</h3>
+          <h4>4장은 무엇을 해결하나?</h4>
+          <ul class="explanation-points"><li>두 장은 서로 다른 기술 목록이 아니라 하나의 설계 질문을 앞뒤에서 다룹니다.</li><li>주문 서비스 A가 포인트 서비스 B에 일을 부탁한다고 해봅시다.</li><li>A가 B의 답을 기다리면 구현과 사용자 경험은 단순하지만, B의 지연과 장애가 A의 응답 경로로 곧장 들어옵니다.</li><li>4장은 이 동기 경로를 유지하면서 피해가 커지지 않도록 타임아웃, 재시도, 동시성 제한, 서킷 브레이커 같은 경계를 세웁니다.</li></ul>
+          <h4>5장으로 가면 무엇이 달라지나?</h4>
+          <ul class="explanation-points"><li>반대로 포인트 지급 결과가 지금 응답에 꼭 필요하지 않다면 A는 일을 나중으로 미룰 수 있습니다.</li><li>5장은 별도 스레드, 메시지 브로커, 배치, CDC 같은 방식으로 처리 시점을 분리합니다.</li><li>그러나 분리한 순간 “호출에 성공했는가?”라는 단순한 질문이 “작업은 안전하게 보관됐는가, 누가 실패를 재처리하는가, 같은 작업이 두 번 오면 어떻게 하는가?”라는 새 질문으로 바뀝니다.</li></ul>
+          <div class="concept-grid">
+            <div class="concept"><b>동기 경로의 핵심</b>사용자의 응답과 B의 결과가 같은 시간선에 있습니다. 이해하기 쉽지만 장애도 같은 경로로 전파됩니다.</div>
+            <div class="concept"><b>비동기 경로의 핵심</b>사용자 응답과 실제 작업 완료가 다른 시간선에 있습니다. 결합은 줄지만 상태가 더 많아집니다.</div>
+            <div class="concept"><b>공통 설계 원칙</b>실패를 없애는 대신 실패가 머물 장소, 기다릴 시간, 다시 처리할 책임을 명시합니다.</div>
+          </div>
+          <p class="micro-summary">이 페이지 전체에서 같은 `주문 생성 → 포인트 지급` 사례를 반복합니다. 기술이 바뀔 때 요청과 데이터의 위치가 어떻게 달라지는지를 중심으로 보세요.</p>
+        </div>
+        <aside class="example-box"><h3>04 · 예시로 연결하기</h3><p>주문은 저장됐는데 포인트 서비스가 느립니다. 포인트 지급까지 기다리면 주문 응답도 늦어집니다.</p><p>적립이 조금 늦어도 되는 정책이라면 주문 접수를 먼저 알리고 적립은 나중에 처리할 수 있습니다.</p><p>단, “접수됐다”와 “적립이 끝났다”는 같은 성공이 아닙니다.</p></aside>
+        <div class="lab-intro"><span class="lab-label">05 · 실습 — 그림으로 확인하기</span><b>세 연결 방식의 차이를 한 번에 비교합니다.</b><p>동기 HTTP → 별도 스레드 → 메시지 브로커 순서로 누르세요.</p><p class="observe">볼 것: 사용자 응답 시점, 일을 기다리는 장소, 실패를 다시 처리할 주체</p></div>
+        <div class="hero-grid">
+          <div class="card">
+            <div class="mode-buttons" role="group" aria-label="연결 방식 선택">
+              <button class="active" data-mode="sync">동기 HTTP</button>
+              <button data-mode="thread">별도 스레드</button>
+              <button data-mode="broker">메시지 브로커</button>
+            </div>
+            <div class="route" aria-live="polite">
+              <div class="node">사용자<small id="userState">응답 대기</small><span class="pulse"></span></div>
+              <div class="arrow">→</div>
+              <div class="node">주문 서비스 A<small id="aState">B 응답 대기</small><span class="pulse"></span></div>
+              <div class="arrow">→</div>
+              <div class="node" id="thirdNode">포인트 서비스 B<small id="bState">요청 처리</small></div>
+            </div>
+            <div id="modeConclusion" class="callout"><strong>동기 HTTP</strong>A는 B의 결과를 같은 요청 흐름에서 기다립니다. B가 느리면 사용자 응답과 A의 자원 점유 시간도 함께 늘어납니다.</div>
+          </div>
+          <aside class="card">
+            <h3>보는 방법</h3>
+            <p>세 방식을 차례로 눌러 `사용자 응답 시점`, `실패를 발견하는 주체`, `작업의 보관 장소`가 어떻게 달라지는지 읽어보세요.</p>
+            <div class="callout good"><strong>핵심 결론</strong>비동기는 작업을 없애지 않습니다. 기다림과 실패 처리의 책임을 다른 시간과 장소로 옮깁니다.</div>
+            <div class="prediction">
+              <label for="prediction-main">예측 — B가 10초 동안 멈추면 각 방식에서 무엇이 달라질까?</label>
+              <textarea id="prediction-main" placeholder="두 사람이 실행 전에 직접 적습니다. 이 파일은 답을 대신 채우지 않습니다."></textarea>
+            </div>
+          </aside>
+        </div>
+      </div>
+    </section>
+
+    <section id="saturation">
+      <div class="shell">
+        <div class="section-head">
+          <div><div class="eyebrow">02 · Cascading failure</div><h2>B의 지연이 A의 포화로 번지는 과정</h2></div>
+          <p><span class="badge book">BOOK</span> 외부 연동 장애 · <span class="badge bridge">BRIDGE</span> 포화, 연쇄 장애, 꼬리 지연</p>
+        </div>
+        <aside class="card topic-primer" aria-label="단어 정의와 요약"><h3>01 · 단어 정의</h3><dl class="term-list"><div><dt>포화</dt><dd>자원이 모두 사용 중이라 새 작업을 바로 받기 어려운 상태</dd></div><div><dt>처리량</dt><dd>단위 시간에 실제로 완료한 작업 수</dd></div><div><dt>꼬리 지연</dt><dd>일부 느린 요청이 보이는 응답 시간의 긴 꼬리</dd></div></dl><div class="topic-tldr"><h3>02 · 핵심 요약</h3><p>B의 지연은 A의 자원 점유 시간을 늘립니다. CPU가 한가해도 풀과 대기열은 가득 찰 수 있습니다.</p></div></aside>
+        <div class="card lesson-copy">
+          <h3>한 요청이 느린 것과 서비스가 무너지는 것은 어떻게 연결될까?</h3>
+          <h4>왜 상대가 느린데 우리가 멈추나?</h4>
+          <ul class="explanation-points"><li>A가 B를 동기 호출하면 A의 요청 처리 스레드는 B의 응답이 올 때까지 그 요청을 끝낼 수 없습니다.</li><li>기다리는 동안 CPU를 계속 쓰는 것은 아니지만, 스레드와 HTTP 커넥션 같은 유한한 자원은 그 요청에 묶여 있습니다.</li><li>B가 평소 100ms 만에 답하면 연결 하나는 1초에 여러 요청을 처리할 수 있지만, 응답 시간이 5초가 되면 같은 연결은 훨씬 오래 점유됩니다.</li></ul>
+          <ol class="storyline">
+            <li><div><b>B의 응답 시간이 길어진다.</b><br>새 요청 수가 그대로여도 각 요청이 시스템 안에 머무는 시간이 늘어납니다.</div></li>
+            <li><div><b>A에서 동시에 진행 중인 요청이 늘어난다.</b><br>요청 스레드와 B용 HTTP 커넥션이 더 오래 사용 중 상태로 남습니다.</div></li>
+            <li><div><b>풀이 가득 차고 대기열이 생긴다.</b><br>새 요청은 실제 업무를 시작하지도 못한 채 스레드나 커넥션을 기다립니다.</div></li>
+            <li><div><b>A 자체의 응답도 느려진다.</b><br>B를 사용하지 않는 기능까지 같은 스레드 풀을 공유한다면 피해가 다른 기능으로 번질 수 있습니다.</div></li>
+            <li><div><b>사용자나 상위 서비스가 재시도한다.</b><br>유입량이 더 커져 회복할 틈을 빼앗는 <span class="term">연쇄 장애(cascading failure)</span>가 됩니다.</div></li>
+          </ol>
+          <div class="callout warn"><strong>CPU가 낮아도 안전한 것은 아니다</strong>서버가 놀고 있는 것처럼 보여도 요청 스레드, HTTP 커넥션, DB 커넥션 또는 큐가 꽉 찼다면 이미 <span class="term">포화(saturation)</span> 상태일 수 있습니다.</div>
+          <h4>평균 응답 시간만 보면 놓치는 것</h4>
+          <ul class="explanation-points"><li>대부분의 요청이 빠르고 일부만 매우 느리면 평균값은 멀쩡해 보입니다.</li><li>사용자 다수가 체감하는 느린 구간을 보려면 p95와 p99 같은 <span class="term">꼬리 지연(tail latency)</span>도 함께 관찰해야 합니다.</li><li>예를 들어 p99가 4초라면 요청 100개 중 약 1개가 4초 이상 걸렸다는 뜻으로 해석할 수 있습니다.</li></ul>
+          <p class="micro-summary">아래 모형에서는 B의 응답 시간을 올려보세요. 유입 요청이 그대로인데도 필요한 동시 진행 수가 늘고, 어느 순간 완료 속도보다 유입 속도가 커지는 경계를 확인할 수 있습니다.</p>
+        </div>
+        <aside class="example-box"><h3>04 · 예시로 연결하기</h3><p>비유: 창구 직원 4명이 각각 본사 승인 전화를 기다리고 있습니다. 직원이 바쁘게 움직이지 않아도 새 손님을 받을 창구는 없습니다.</p><p>전화 대기가 길어질수록 줄이 길어집니다. 서버에서도 응답 대기가 길어지면 스레드·연결이 오래 묶입니다.</p><p>비유의 범위: 블로킹 호출의 자원 점유를 설명합니다. 모든 서버가 요청 하나당 OS 스레드 하나를 쓰는 것은 아닙니다.</p></aside>
+        <div class="lab-intro"><span class="lab-label">05 · 실습 — 수치로 확인하기</span><b>먼저 유입 요청은 그대로 두고 B 응답 시간만 천천히 늘리세요.</b><p>필요한 동시 진행 요청이 슬롯을 넘어가는 순간부터 대기가 누적됩니다.</p><p class="observe">볼 것: 필요 동시 요청 → 초당 밀리는 요청 → p95의 순서로 무엇이 먼저 악화되는가</p></div>
+        <div class="card">
+          <div class="control-grid">
+            <div class="control"><label for="arrival">유입 요청 <output id="arrivalOut">80 req/s</output></label><input id="arrival" type="range" min="10" max="300" value="80" step="10"></div>
+            <div class="control"><label for="latency">B 응답 시간 <output id="latencyOut">300 ms</output></label><input id="latency" type="range" min="50" max="5000" value="300" step="50"></div>
+            <div class="control"><label for="threads">A 요청 스레드 <output id="threadsOut">100</output></label><input id="threads" type="range" min="10" max="200" value="100" step="10"></div>
+            <div class="control"><label for="httpLimit">B 동시 호출 한도 <output id="httpLimitOut">50</output></label><input id="httpLimit" type="range" min="5" max="150" value="50" step="5"></div>
+          </div>
+          <div class="metric-grid" aria-live="polite">
+            <div class="metric"><b id="capacityMetric">166/s</b><span>이론적 B 호출 처리 한계</span><div class="meter"><i id="capacityBar"></i></div></div>
+            <div class="metric"><b id="inflightMetric">24</b><span>필요한 동시 진행 요청</span><div class="meter"><i id="inflightBar"></i></div></div>
+            <div class="metric"><b id="queueMetric">0</b><span>초당 밀려나는 요청의 근사치</span><div class="meter"><i id="queueBar"></i></div></div>
+            <div class="metric"><b id="p95Metric">390 ms</b><span>추정 p95 응답 시간</span><div class="meter"><i id="p95Bar"></i></div></div>
+          </div>
+          <p id="saturationExplain" class="explain"></p>
+          <div class="callout warn"><strong>모형의 한계</strong>이 계산은 개념 학습용 근사치입니다. 실제 처리량은 CPU, 네트워크, 큐 정책, 요청별 처리 시간 분포와 HTTP 버전에 따라 달라집니다.</div>
+        </div>
+      </div>
+    </section>
+
+    <section id="timeouts">
+      <div class="shell">
+        <div class="section-head">
+          <div><div class="eyebrow">03 · Time budget</div><h2>타임아웃은 하나가 아니다</h2></div>
+          <p><span class="badge book">BOOK</span> 연결·읽기 타임아웃 · <span class="badge deep">DEEP</span> 풀 대기와 전체 deadline</p>
+        </div>
+        <aside class="card topic-primer" aria-label="단어 정의와 요약"><h3>01 · 단어 정의</h3><dl class="term-list"><div><dt>타임아웃</dt><dd>특정 단계에서 기다릴 수 있는 시간의 상한</dd></div><div><dt>Deadline</dt><dd>전체 작업을 끝내야 하는 최종 시한</dd></div><div><dt>결과 불명확</dt><dd>응답을 못 받아 상대의 실제 처리 결과를 확정할 수 없는 상태</dd></div></dl><div class="topic-tldr"><h3>02 · 핵심 요약</h3><p>기다림을 제한하는 것과 상대 작업을 취소하는 것은 다릅니다. 단계별 제한과 전체 예산을 함께 봅니다.</p></div></aside>
+        <div class="card lesson-copy">
+          <h3>타임아웃은 실패를 만드는 설정이 아니라 기다림의 상한선이다</h3>
+          <h4>왜 제한이 필요한가?</h4>
+          <ul class="explanation-points"><li>타임아웃을 설정하면 정상 요청도 실패할 수 있으므로 처음에는 불편하게 느껴집니다.</li><li>하지만 타임아웃이 없으면 장애 난 요청 하나가 언제 끝날지 모르는 채 자원을 점유합니다.</li><li>타임아웃의 목적은 성공률을 무조건 높이는 것이 아니라, 한 의존성 때문에 우리 서비스가 사용할 수 있는 시간과 자원이 무한정 소비되지 않도록 경계를 세우는 데 있습니다.</li></ul>
+          <h4>하나의 HTTP 호출에서 무엇을 기다리나?</h4>
+          <ul class="explanation-points"><li>중요한 점은 HTTP 호출이 한 번의 기다림으로 이루어지지 않는다는 것입니다.</li><li>이미 만들어 둔 연결이 모두 사용 중이면 먼저 풀에서 커넥션을 기다립니다.</li><li>새 연결이 필요하면 DNS 조회, TCP 연결, HTTPS의 TLS 협상이 이어집니다.</li><li>그 뒤 요청을 보내고 서버가 처리하여 응답 데이터를 돌려줄 때까지 다시 기다립니다.</li><li>라이브러리마다 이름과 포함 범위가 조금씩 다르기 때문에 “5초 타임아웃을 걸었다”만으로는 어느 구간을 제한했는지 알 수 없습니다.</li></ul>
+          <div class="reading-guide">
+            <b>풀 대기</b><span>우리 프로세스 안에서 사용 가능한 연결을 빌리지 못해 기다리는 시간입니다. B에 패킷을 보내기도 전입니다.</span>
+            <b>연결 수립</b><span>원격 주소로 네트워크 연결을 만드는 시간입니다. 네트워크 단절, 잘못된 라우팅, 방화벽 등의 영향을 받습니다.</span>
+            <b>응답 대기</b><span>연결 뒤 B의 처리 또는 데이터 수신을 기다리는 시간입니다. B의 과부하와 느린 쿼리가 드러나는 구간입니다.</span>
+            <b>전체 예산</b><span>위 단계와 재시도를 모두 합쳐 이 업무가 기다릴 수 있는 총 시간입니다. 상위 요청의 deadline보다 길면 의미가 없습니다.</span>
+          </div>
+          <div class="callout danger"><strong>가장 위험한 오해</strong>클라이언트가 타임아웃 예외를 받았다는 사실은 B의 처리가 취소됐다는 뜻이 아닙니다. B가 처리를 끝낸 직후 응답만 유실됐을 수도 있습니다. 결제·포인트처럼 부작용이 있는 요청은 이 결과 불명확 상태를 반드시 설계해야 합니다.</div>
+          <p class="micro-summary">아래 슬라이더는 네 구간의 합과 전체 deadline을 비교합니다. 실제 설정에서는 각 구간별 제한과 업무 전체 예산을 함께 보아야 합니다.</p>
+        </div>
+        <div class="card">
+            <h3>정확한 경계</h3>
+            <div class="comparison-list"><article class="comparison-item"><h4>풀 대기 타임아웃</h4><dl class="record-fields"><div><dt>제한하는 것</dt><dd>사용 가능한 HTTP 커넥션을 빌릴 때까지의 기다림</dd></div></dl></article><article class="comparison-item"><h4>연결 타임아웃</h4><dl class="record-fields"><div><dt>제한하는 것</dt><dd>원격지와 연결을 수립하는 기다림</dd></div></dl></article><article class="comparison-item"><h4>읽기/응답 타임아웃</h4><dl class="record-fields"><div><dt>제한하는 것</dt><dd>연결 후 응답 데이터가 오기를 기다리는 시간</dd></div></dl></article><article class="comparison-item"><h4>전체 deadline</h4><dl class="record-fields"><div><dt>제한하는 것</dt><dd>재시도를 포함한 업무 호출 전체 시간 예산</dd></div></dl></article></div>
+            <div class="callout danger"><strong>타임아웃 ≠ 원격 작업 취소</strong>A가 실패를 관찰했어도 B는 이미 포인트를 지급했을 수 있습니다. 이것이 결과 불명확(ambiguous outcome)입니다.</div>
+          </div>
+        <div class="card lesson-copy" style="margin-top:22px">
+          <h3>핵심 외부 서비스의 이중화는 ‘주소를 두 개 적는 일’이 아니다</h3>
+          <p>결제·본인인증처럼 이 기능이 멈추면 핵심 업무 자체가 멈추는 의존성은 대체 경로를 검토할 수 있습니다. 하지만 결제사 A가 실패하면 결제사 B를 호출한다는 코드만으로 복원력이 생기지는 않습니다. 두 제공자의 요청·응답 모델, 오류 코드, 인증 방식, 정산과 취소 절차가 다르며, 전환 도중 첫 번째 요청이 실제 성공했는지 모르는 결과 불명확 문제도 남습니다.</p>
+          <div class="concept-grid">
+            <div class="concept"><b>전환 조건</b>연결 실패, 타임아웃, 특정 5xx 중 무엇을 장애로 볼지 정합니다. 잘못된 입력 같은 4xx를 다른 업체로 반복해서 보내면 대체 경로도 실패합니다.</div>
+            <div class="concept"><b>중복 효과 방지</b>첫 제공자가 처리했지만 응답이 유실된 뒤 두 번째 제공자로 전환하면 이중 결제·이중 발송이 생길 수 있습니다. 업무 키와 상태 조회·보상 절차가 필요합니다.</div>
+            <div class="concept"><b>운영 현실</b>용량, 계약, 비용, 데이터 형식, 개인정보 이전, 정산 대사와 장애 훈련까지 유지해야 실제 대체 경로가 됩니다.</div>
+          </div>
+          <p class="micro-summary">이중화는 모든 외부 연동에 붙이는 기본 옵션이 아닙니다. 장애 손실이 이중화의 개발·운영·계약 비용보다 큰 핵심 기능인지부터 판단하고, 평상시에도 대체 경로를 시험해야 합니다.</p>
+        </div>
+        <aside class="example-box"><h3>04 · 예시로 연결하기</h3><p>예시: 포인트 지급 요청에 2초 제한을 걸었습니다. A는 2초 뒤 오류를 응답했지만 B는 3초 뒤 지급을 완료할 수 있습니다.</p><p>사용자에게 오류가 보였다고 바로 다시 지급하면 포인트가 두 번 반영될 수 있습니다.</p><p>실제 대응은 지급 상태 조회나 동일 업무 키를 이용한 멱등 처리입니다. 단순히 제한 시간을 늘리는 것만으로 해결되지는 않습니다.</p></aside>
+        <div class="lab-intro"><span class="lab-label">05 · 실습 — 시간선으로 확인하기</span><b>전체 deadline은 고정하고 풀 대기·연결·응답 시간을 하나씩 늘리세요.</b><p>각 타임아웃이 어느 구간을 제한하는지 먼저 확인한 뒤 전체 합과 비교합니다.</p><p class="observe">볼 것: 호출자가 실패를 관찰한 시각과 B의 실제 처리 완료 여부는 같은 정보가 아니다</p></div>
+        <div class="grid-2">
+          <div class="card">
+            <div class="control-grid" style="grid-template-columns:repeat(2,minmax(0,1fr))">
+              <div class="control"><label for="poolWait">풀 대기 <output id="poolWaitOut">100 ms</output></label><input id="poolWait" type="range" min="0" max="2000" value="100" step="50"></div>
+              <div class="control"><label for="connectDelay">연결 수립 <output id="connectDelayOut">200 ms</output></label><input id="connectDelay" type="range" min="0" max="2000" value="200" step="50"></div>
+              <div class="control"><label for="responseDelay">응답 대기 <output id="responseDelayOut">900 ms</output></label><input id="responseDelay" type="range" min="0" max="5000" value="900" step="100"></div>
+              <div class="control"><label for="deadline">전체 deadline <output id="deadlineOut">2000 ms</output></label><input id="deadline" type="range" min="500" max="6000" value="2000" step="100"></div>
+            </div>
+            <div class="timeline" aria-label="HTTP 호출 단계 타임라인">
+              <div class="phase"><b>풀에서 빌리기</b><div class="phase-bar"><span id="poolBar"></span></div><span id="poolPhaseValue"></span></div>
+              <div class="phase"><b>DNS·TCP·TLS</b><div class="phase-bar"><span id="connectBar"></span></div><span id="connectPhaseValue"></span></div>
+              <div class="phase"><b>요청 전송</b><div class="phase-bar"><span style="width:3%"></span></div><span>50 ms</span></div>
+              <div class="phase"><b>응답 대기·읽기</b><div class="phase-bar"><span id="responseBar"></span></div><span id="responsePhaseValue"></span></div>
+            </div>
+            <div id="timeoutResult" class="timeout-flag" aria-live="polite"></div>
+          </div>
+
+        </div>
+
+      </div>
+    </section>
+
+    <section id="pool">
+      <div class="shell">
+        <div class="section-head">
+          <div><div class="eyebrow">04 · Connection reuse</div><h2>Keep-Alive와 HTTP 커넥션 풀</h2></div>
+          <p><span class="badge book">BOOK</span> 풀 크기·대기 시간·유지 시간 · <span class="badge bridge">BRIDGE</span> route, 다중화</p>
+        </div>
+        <aside class="card topic-primer" aria-label="단어 정의와 요약"><h3>01 · 단어 정의</h3><dl class="term-list"><div><dt>커넥션</dt><dd>두 시스템 사이에 만들어진 통신 연결</dd></div><div><dt>Keep-Alive</dt><dd>요청이 끝나도 연결을 유지해 다음 요청에 재사용할 수 있게 하는 성질</dd></div><div><dt>커넥션 풀</dt><dd>연결의 생성·대여·반납·폐기를 관리하는 장치</dd></div></dl><div class="topic-tldr"><h3>02 · 핵심 요약</h3><p>Keep-Alive는 연결을 살려두는 것, 풀은 그 연결을 관리하며 빌려주는 것입니다. 응답 데이터를 캐시하는 것은 아닙니다.</p></div></aside>
+        <div class="card lesson-copy">
+          <h3>연결을 만드는 비용과, 연결을 빌리는 규칙을 나누어 생각하자</h3>
+          <h4>연결을 왜 재사용하나?</h4>
+          <ul class="explanation-points"><li>HTTPS 요청을 보낼 때마다 새 연결을 만든다면 TCP 연결과 TLS 협상을 반복해야 합니다.</li><li>같은 목적지에 요청을 자주 보낸다면 이미 만든 연결을 다음 요청에도 사용하는 편이 빠릅니다.</li><li>HTTP의 지속 연결, 흔히 말하는 <span class="term">Keep-Alive</span>는 요청 하나가 끝난 뒤에도 연결을 즉시 닫지 않아 재사용할 수 있게 하는 성질입니다.</li></ul>
+          <h4>풀은 구체적으로 무슨 일을 하나?</h4>
+          <ul class="explanation-points"><li>하지만 살아 있는 연결이 있다는 사실만으로 여러 스레드가 안전하고 효율적으로 공유할 수 있는 것은 아닙니다.</li><li><span class="term">커넥션 풀</span>은 연결들을 보관하고, 요청에게 빌려주고, 사용이 끝나면 돌려받고, 너무 오래 놀았거나 수명이 끝난 연결을 폐기하는 관리 장치입니다.</li><li>DB 커넥션 풀과 빌리고 반납한다는 모양은 비슷하지만, HTTP 연결은 프로토콜 버전과 목적지별 route, 상대 서버의 keep-alive 정책까지 영향을 받습니다.</li></ul>
+          <ol class="storyline">
+            <li><div>요청이 들어오면 클라이언트는 해당 목적지에 재사용 가능한 연결이 있는지 찾습니다.</div></li>
+            <li><div>유휴 연결이 있으면 빌립니다. 없지만 풀 한도가 남았다면 새 연결을 만듭니다.</div></li>
+            <li><div>한도까지 모두 사용 중이면 요청은 풀 앞 대기열에 들어가거나 즉시 거절됩니다.</div></li>
+            <li><div>응답 처리가 끝나고 재사용 가능한 연결이면 풀에 반환합니다. 연결이 깨졌거나 수명이 끝났다면 닫습니다.</div></li>
+          </ol>
+          <div class="concept-grid">
+            <div class="concept"><b>max total</b>이 클라이언트가 모든 목적지에 유지할 수 있는 전체 연결 상한입니다.</div>
+            <div class="concept"><b>max per route</b>특정 목적지에 동시에 빌려줄 수 있는 연결 상한입니다.</div>
+            <div class="concept"><b>pending acquire</b>연결을 빌릴 수 있을 때까지 기다리는 요청과 그 시간 제한입니다.</div>
+          </div>
+          <h4>왜 풀을 무조건 크게 하면 안 될까?</h4>
+          <ul class="explanation-points"><li>풀이 작으면 요청이 풀 앞에서 기다려 전체 응답 시간이 늘 수 있습니다.</li><li>그러나 풀이 너무 크면 A가 B의 처리 한계를 훨씬 넘는 요청을 한꺼번에 보낼 수 있습니다.</li><li>그러면 B가 더 느려지고 A의 연결이 더 오래 점유되어 양쪽이 함께 악화됩니다.</li><li>풀 크기는 단순 성능 수치가 아니라 <b>A가 B에 허용하는 동시 부하의 상한</b>이라는 관점으로 보아야 합니다.</li></ul>
+          <div class="callout warn"><strong>RestClient라는 이름만으로 기본 풀 크기를 알 수 없다</strong>Spring `RestClient`는 상위 API입니다. 실제 연결 재사용과 제한은 Apache HttpClient, JDK HttpClient, Jetty, Reactor Netty 또는 단순 request factory 중 어떤 구현을 쓰는지에 따라 달라집니다. 클라이언트 인스턴스도 요청마다 만들지 말고 애플리케이션에서 재사용 가능한 형태로 구성해야 합니다.</div>
+          <p class="micro-summary">아래에서 요청 수를 풀 용량보다 크게 만든 뒤, 연결당 스트림 수를 바꿔보세요. HTTP/2식 다중화에서는 연결 개수와 동시 요청 수가 일대일이 아닐 수 있다는 차이가 드러납니다.</p>
+        </div>
+        <aside class="example-box"><h3>04 · 예시로 연결하기</h3><p>비유: 같은 거래처와 통화할 전화선이 4개 있습니다. 통화가 끝나면 선을 없애지 않고 다음 담당자에게 빌려줍니다.</p><p>HTTP/1.1의 단순 모형에서 요청 7개가 동시에 오면 4개가 연결을 사용하고 3개는 반환을 기다립니다.</p><p>비유의 범위: HTTP/2는 한 연결에서 여러 스트림을 동시에 처리할 수 있습니다. 따라서 전화선 수와 동시 요청 수가 항상 같지는 않습니다.</p></aside>
+        <div class="lab-intro"><span class="lab-label">05 · 실습 — 풀에서 빌리고 기다리는 과정 보기</span><b>풀 크기 4, 동시 요청 7인 기본 상태부터 읽으세요.</b><p>파란 슬롯은 사용 중인 연결, 노란 요청은 풀 앞에서 기다리는 요청입니다. 그다음 풀 크기와 연결당 스트림을 바꿉니다.</p><p class="observe">볼 것: 풀을 키워 A의 대기를 줄이는 것과 B가 감당할 부하를 제한하는 것은 서로 다른 목표다</p></div>
+        <div class="card">
+          <div class="control-grid" style="grid-template-columns:repeat(3,minmax(0,1fr))">
+            <div class="control"><label for="poolSize">풀 크기 <output id="poolSizeOut">4</output></label><input id="poolSize" type="range" min="1" max="12" value="4"></div>
+            <div class="control"><label for="requestCount">동시 요청 <output id="requestCountOut">7</output></label><input id="requestCount" type="range" min="1" max="18" value="7"></div>
+            <div class="control"><label for="streams">연결당 동시 스트림 <output id="streamsOut">1 · HTTP/1.1식</output></label><input id="streams" type="range" min="1" max="4" value="1"></div>
+          </div>
+          <div class="pool-scene">
+            <div><h4>요청</h4><div id="requestStack" class="request-stack"></div></div>
+            <div class="arrow">→</div>
+            <div><h4>같은 route의 커넥션 풀</h4><div id="connectionSlots" class="connection-slots"></div></div>
+            <div class="arrow">→</div>
+            <div class="node">포인트 서비스 B<small>처리 한계는 별개</small></div>
+          </div>
+          <div id="poolExplain" class="callout" aria-live="polite"></div>
+          <div class="grid-3" style="margin-top:18px">
+            <div class="callout good"><strong>Keep-Alive</strong>연결을 요청 뒤 곧바로 닫지 않고 재사용 가능하게 유지하는 성질</div>
+            <div class="callout"><strong>Connection pool</strong>살아 있는 연결을 보관하고 여러 실행 흐름에 빌려주는 관리 장치</div>
+            <div class="callout warn"><strong>같은 곳의 의미</strong>막연한 도메인보다 scheme·host·port·proxy 등을 포함한 origin/route 경계를 확인</div>
+          </div>
+          <details style="margin-top:18px" open data-default-open>
+            <summary>Spring `RestClient`에서 꼭 알아야 할 점</summary>
+            <p>`RestClient`는 동기식 고수준 API이며 실제 네트워크 동작은 선택된 request factory와 하위 HTTP 클라이언트가 담당합니다. 따라서 “RestClient 기본 풀은 몇 개”라고 하나의 숫자로 답할 수 없습니다. Apache, Jetty, JDK, Reactor Netty 또는 단순 구현 중 무엇이 실제로 선택됐는지 먼저 확인해야 합니다.</p>
+          </details>
+          <details>
+            <summary>HTTP/2에서는 왜 풀 크기와 동시 요청 수가 같지 않을까?</summary>
+            <p>HTTP/1.1의 전형적 연결 사용과 달리 HTTP/2는 한 연결 안에서 여러 스트림을 다중화할 수 있습니다. 그래서 연결 1개가 동시에 요청 여러 개를 운반할 수 있습니다. 단, 실제 최대 스트림 수와 풀 정책은 클라이언트·서버 설정에 달려 있습니다.</p>
+          </details>
+        </div>
+      </div>
+    </section>
+
+    <section id="resilience">
+      <div class="shell">
+        <div class="section-head">
+          <div><div class="eyebrow">05 · Resilience</div><h2>재시도하고, 제한하고, 빠르게 실패하기</h2></div>
+          <p>장치마다 보호하는 경계가 다릅니다. 여러 장치를 켠다고 자동으로 안전해지는 것도 아닙니다.</p>
+        </div>
+        <aside class="card topic-primer" aria-label="단어 정의와 요약"><h3>01 · 단어 정의</h3><dl class="term-list"><div><dt>재시도</dt><dd>실패한 작업을 정해진 조건에서 다시 실행하는 것</dd></div><div><dt>멱등성</dt><dd>같은 연산을 반복해도 한 번 실행한 것과 같은 효과가 남는 성질</dd></div><div><dt>서킷 브레이커</dt><dd>실패가 누적된 의존성으로의 호출을 잠시 차단하고 회복을 시험하는 장치</dd></div></dl><div class="topic-tldr"><h3>02 · 핵심 요약</h3><p>재시도는 다시 보내는 판단이고, 서킷은 보내지 않는 판단입니다. 중복 효과와 추가 부하를 먼저 따져야 합니다.</p></div></aside>
+        <div class="card lesson-copy">
+          <h3>복원력 패턴은 모두 “호출을 더 성공시키는 기능”이 아니다</h3>
+          <h4>언제 다시 보내도 되나?</h4>
+          <ul class="explanation-points"><li>일시적인 패킷 유실이나 짧은 서버 재시작처럼 곧 회복되는 실패라면 재시도가 성공 확률을 높입니다.</li><li>하지만 B가 이미 과부하이거나 잘못된 입력 때문에 거절한 요청이라면 재시도는 같은 실패를 반복하며 부하만 늘립니다.</li><li>그래서 재시도 여부는 오류 코드 하나가 아니라 <b>실패의 일시성, 업무 연산의 멱등성, 남은 시간 예산, 현재 의존성의 상태</b>를 함께 보고 결정해야 합니다.</li></ul>
+          <h4>멱등하다는 것은 무엇인가?</h4>
+          <ul class="explanation-points"><li><span class="term">멱등성(idempotency)</span>은 같은 연산을 여러 번 적용해도 최종 결과가 한 번 적용했을 때와 같다는 성질입니다.</li><li>단순 조회는 보통 멱등하지만, “100포인트 추가”는 그대로 두 번 실행하면 200포인트가 되어 멱등하지 않습니다.</li><li>이때 요청마다 고유한 idempotency key를 보내고 B가 이미 처리한 키를 기억하면 동일 요청의 재실행을 한 번의 효과로 제한할 수 있습니다.</li></ul>
+          <div class="concept-grid">
+            <div class="concept"><b>재시도</b>이번 실패가 일시적이라고 보고 다시 기회를 줍니다. 횟수와 간격, 대상 오류를 제한합니다.</div>
+            <div class="concept"><b>동시성 제한·벌크헤드</b>실행 중인 작업 수와 사용 자원을 제한하여 한 의존성의 지연이 다른 기능까지 번지는 것을 막습니다.</div>
+            <div class="concept"><b>서킷 브레이커</b>최근 관찰 결과상 성공 가능성이 낮으면 실제 호출을 잠시 중단하여 자원 낭비와 추가 부하를 줄입니다.</div>
+          </div>
+          <h4>백오프와 지터가 필요한 이유</h4>
+          <ul class="explanation-points"><li>장애가 나면 여러 인스턴스와 사용자가 비슷한 시점에 실패를 관찰합니다.</li><li>모두 1초 뒤에 다시 시도하면 정확히 1초마다 요청이 한꺼번에 몰립니다.</li><li><span class="term">지수 백오프</span>는 실패할수록 간격을 늘리고, <span class="term">지터</span>는 각 호출의 간격을 조금씩 흩어 회복 중인 B에 재시도가 동기화되는 현상을 줄입니다.</li></ul>
+          <div class="callout danger"><strong>패턴을 조합하면 순서도 설계다</strong>재시도가 서킷 브레이커의 실패 통계 안쪽에 있는지 바깥쪽에 있는지, 동시성 슬롯을 한 번의 업무가 잡는지 각 재시도가 새로 잡는지에 따라 관찰 결과가 달라집니다. 라이브러리 애너테이션을 여러 개 붙이는 것만으로 의도한 보호가 완성되지 않습니다.</div>
+          <p class="micro-summary">아래에서 재시도 간격을 먼저 비교하고, 이어서 서킷의 상태를 바꿉니다. 각 장치가 요청을 성공시키는지보다 “어떤 요청을 아예 보내지 않는가”를 관찰하세요.</p>
+        </div>
+        <div class="grid-3 patterns" style="margin-top:22px">
+          <div class="card"><span class="badge book">BOOK</span><h3>동시 요청 제한</h3><p>지금 B로 진행시킬 작업의 수를 제한합니다. 넘친 요청은 짧게 대기시키거나 거절합니다.</p></div>
+          <div class="card"><span class="badge bridge">BRIDGE</span><h3>벌크헤드</h3><p>B 호출용 자원을 다른 기능과 분리합니다. B가 잠겨도 A의 다른 기능이 같은 풀을 모두 빼앗기지 않게 합니다.</p></div>
+          <div class="card"><span class="badge book">BOOK</span><h3>서킷 브레이커</h3><p>최근 실패가 기준을 넘으면 실제 호출을 잠시 생략하고 빠르게 실패합니다. 시간이 지나면 제한된 시험 호출로 회복을 확인합니다.</p></div>
+        </div>
+        <aside class="example-box"><h3>04 · 예시로 연결하기</h3><p>포인트 100점 추가를 두 번 실행하면 200점입니다. 응답만 유실됐을 때 무조건 재시도하면 중복 지급됩니다.</p><p>같은 지급 건에 같은 업무 키를 보내고, 서버가 이미 반영한 키를 확인하면 재시도해도 효과를 한 번으로 제한할 수 있습니다.</p><p>한편 B 전체가 장애라면 개별 요청을 계속 재시도하기보다 서킷으로 새 호출을 잠시 막아 추가 부하를 줄입니다.</p></aside>
+        <div class="lab-intro"><span class="lab-label">05 · 실습 — 두 장치를 따로 확인하기</span><b>재시도 간격을 먼저 비교한 뒤, 그 아래 서킷 브레이커의 안내 시나리오를 시작하세요.</b><p>재시도는 실패한 한 요청에 다시 기회를 주고, 서킷 브레이커는 최근 실패가 계속될 때 새 요청을 B로 보내지 않습니다.</p><p class="observe">볼 것: 요청을 ‘언제 다시 보내는가’와 ‘아예 보내지 않는가’의 차이</p></div>
+        <div class="grid-2">
+          <div class="card">
+            <h3>재시도 간격 비교</h3>
+            <div class="segmented" role="group" aria-label="재시도 방식">
+              <button class="active" data-retry="immediate">즉시</button>
+              <button data-retry="fixed">고정 간격</button>
+              <button data-retry="expo">지수 백오프</button>
+              <button data-retry="jitter">백오프 + 지터</button>
+            </div>
+            <div id="retryTrack" class="retry-track" aria-label="재시도 시점"></div>
+            <p id="retryExplain" class="explain"></p>
+            <div class="callout danger"><strong>Retry storm</strong>이미 느린 B에 여러 호출자가 동시에 재시도하면 정상 요청이 회복할 여유까지 빼앗을 수 있습니다.</div>
+          </div>
+          <div class="card">
+            <h3>서킷 브레이커: 장애→차단→복구</h3>
+            <p><b>서킷 브레이커</b>는 A 안에서 B 호출 결과를 관찰하는 상태 기계입니다. 최근 실패가 기준을 넘으면 B가 회복할 시간을 주기 위해 새 호출을 일정 시간 차단하고, 시간이 지나면 소수의 시험 호출만 보냅니다.</p>
+            <div class="circuit-meaning">
+              <div><b>CLOSED · 닫힘</b>게이트가 닫혔다는 뜻이 아니라 <em>회로가 연결된 상태</em>입니다. 요청을 B로 보내고 성공·실패를 기록합니다.</div>
+              <div><b>OPEN · 열림</b>회로가 끊어진 상태입니다. 요청은 B로 가지 않고 A에서 곧바로 실패 또는 대체 응답을 받습니다.</div>
+              <div><b>HALF-OPEN · 반열림</b>차단 시간이 지난 뒤 제한된 시험 요청만 B로 보내 회복 여부를 확인합니다.</div>
+            </div>
+            <div class="circuit-guide">
+              <b>처음에는 아래 ‘안내 시나리오 시작’을 누르세요.</b>
+              <span id="circuitGuideText">한 버튼으로 실패 3회 → OPEN 차단 → 시간 경과 → HALF-OPEN 시험 성공 → CLOSED 복구를 순서대로 보여줍니다.</span>
+            </div>
+            <div class="state-machine">
+              <div id="closedState" class="state active closed">CLOSED<br><small>B로 요청 전달</small></div>
+              <div id="openState" class="state">OPEN<br><small>B 호출 차단</small></div>
+              <div id="halfState" class="state">HALF-OPEN<br><small>소수만 시험 호출</small></div>
+            </div>
+            <div class="circuit-observation" aria-live="polite">
+              <div><span>현재 상태</span><b id="circuitStateMetric">CLOSED</b></div>
+              <div><span>새 요청은 B로?</span><b id="circuitRemoteMetric">전달함</b></div>
+              <div><span>연속 실패 · 모형 기준</span><b id="circuitFailureMetric">0 / 3</b></div>
+            </div>
+            <div class="failure-buttons">
+              <button id="nextCircuit" class="soft-button">안내 시나리오 시작</button>
+              <button id="resetCircuit">처음으로</button>
+            </div>
+            <p id="circuitExplain" class="explain" aria-live="polite"></p>
+            <details style="margin-top:14px">
+              <summary>이해한 뒤 자유롭게 상태 바꾸기</summary>
+              <p>현재 상태에서 B 호출 결과 또는 시간 경과를 직접 입력합니다. OPEN 상태에서는 실제 B 호출이 없으므로 성공·실패 결과도 새로 관찰할 수 없다는 점에 주의하세요.</p>
+              <div class="failure-buttons">
+                <button id="recordSuccess">B 호출 성공</button>
+                <button id="recordFailure">B 호출 실패</button>
+                <button id="advanceTime">OPEN 대기시간 경과</button>
+              </div>
+            </details>
+          </div>
+        </div>
+
+        <div class="callout warn" style="margin-top:18px"><strong>구분</strong>동시성 제한은 “한 시점에 몇 개”, rate limit은 대체로 “일정 시간에 몇 개”를 묻습니다. 과부하 제한에는 429와 Retry-After가, 현재 의존성 장애에는 503이 더 적절할 수 있지만 최종 상태 코드는 API 계약에 따라 결정합니다.</div>
+      </div>
+    </section>
+
+    <section id="consistency">
+      <div class="shell">
+        <div class="section-head">
+          <div><div class="eyebrow">06 · Ambiguous outcome</div><h2>DB는 롤백됐는데 포인트는 지급됐다면?</h2></div>
+          <p><span class="badge book">BOOK</span> DB와 외부 연동 · <span class="badge deep">DEEP</span> 보상, 대사, Saga</p>
+        </div>
+        <aside class="card topic-primer" aria-label="단어 정의와 요약"><h3>01 · 단어 정의</h3><dl class="term-list"><div><dt>로컬 트랜잭션</dt><dd>한 DB 등 해당 트랜잭션에 참여한 자원의 변경을 함께 커밋·롤백하는 범위</dd></div><div><dt>보상</dt><dd>이미 완료된 일을 취소·환불 같은 별도 작업으로 되돌리는 것</dd></div><div><dt>대사</dt><dd>서로 다른 시스템의 기록을 비교해 불일치를 찾고 바로잡는 절차</dd></div></dl><div class="topic-tldr"><h3>02 · 핵심 요약</h3><p>우리 DB 롤백은 외부 서비스의 성공까지 취소하지 않습니다. 각 시스템에 실제로 무엇이 남았는지 따로 봐야 합니다.</p></div></aside>
+        <div class="card lesson-copy">
+          <h3>트랜잭션 안에 HTTP 호출을 적어도 원격 시스템은 트랜잭션 밖에 있다</h3>
+          <h4>트랜잭션 경계는 어디까지인가?</h4>
+          <ul class="explanation-points"><li>Spring 메서드에 `@Transactional`이 붙어 있고 그 안에서 포인트 API를 호출한다고 해봅시다.</li><li>주문 DB의 변경은 커밋하거나 롤백할 수 있지만, HTTP 너머에 있는 포인트 서비스는 주문 DB의 로컬 트랜잭션에 참여하지 않습니다.</li><li>포인트 지급이 끝난 뒤 주문 DB 커밋이 실패해도 주문 서비스가 포인트 서비스의 데이터까지 자동으로 되돌릴 수는 없습니다.</li></ul>
+          <h4>응답을 못 받으면 무엇을 모르는가?</h4>
+          <ul class="explanation-points"><li>더 까다로운 경우는 A가 결과를 모르는 때입니다.</li><li>B가 포인트를 반영한 뒤 응답을 보내는 순간 네트워크가 끊기면 A에는 읽기 타임아웃이 발생합니다.</li><li>A가 보는 사실은 “응답을 받지 못했다”뿐이며, “B가 처리하지 않았다”가 아닙니다.</li><li>이 상태에서 곧바로 같은 지급 요청을 다시 보내면 중복 반영될 수 있습니다.</li></ul>
+          <div class="concept-grid">
+            <div class="concept"><b>보상 작업</b>이미 완료된 원격 부작용을 취소·환불처럼 업무적으로 되돌리는 별도의 연산입니다. 원래 트랜잭션의 롤백과는 다릅니다.</div>
+            <div class="concept"><b>대사(reconciliation)</b>두 시스템의 기록을 주기적으로 비교해 누락과 불일치를 찾아 자동 또는 수동으로 바로잡습니다.</div>
+            <div class="concept"><b>Saga</b>여러 로컬 트랜잭션과 보상 동작을 하나의 긴 업무 흐름으로 관리하는 접근입니다.</div>
+          </div>
+          <h4>DB 트랜잭션 안에서 외부 호출을 오래 기다릴 때의 부작용</h4>
+          <ul class="explanation-points"><li>네트워크를 기다리는 동안 주문 DB 커넥션과 행 락이 유지될 수 있습니다.</li><li>외부 서비스가 느려지면 HTTP 풀뿐 아니라 DB 풀까지 함께 고갈되어 전혀 다른 DB 기능도 멈출 수 있습니다.</li><li>따라서 데이터 정합성만 보고 트랜잭션 범위를 길게 잡지 말고, 자원 점유와 실패 복구 절차까지 함께 판단해야 합니다.</li></ul>
+          <p class="micro-summary">아래 실패 지점 네 가지를 바꿔보세요. “어디서 예외가 났는가”보다 각 시스템에 실제로 어떤 효과가 남았는지를 추적해야 합니다.</p>
+        </div>
+        <div class="card">
+            <h3>로컬 트랜잭션의 경계</h3>
+            <p>주문 DB의 트랜잭션은 원격 포인트 서비스의 DB를 자동으로 롤백하지 않습니다. HTTP 호출을 트랜잭션 안에서 오래 기다리면 주문 DB 커넥션과 락도 오래 점유할 수 있습니다.</p>
+            <div class="callout danger"><strong>읽기 타임아웃의 함정</strong>A가 응답을 못 받았다는 사실만으로 B가 실패했다고 결론낼 수 없습니다.</div>
+            <h4>복구 계약에 들어갈 것</h4>
+            <ul><li>idempotency key</li><li>상태 조회 또는 결과 확인</li><li>취소·환불 같은 보상 작업</li><li>주기적인 데이터 대사(reconciliation)</li><li>실패 상태와 수동 처리 절차</li></ul>
+          </div>
+        <aside class="example-box"><h3>04 · 예시로 연결하기</h3><p>주문 DB에 주문을 쓰고, 포인트 서비스에서 100점을 차감했습니다. 그런데 마지막 주문 DB 커밋이 실패했습니다.</p><p>주문은 없는데 포인트는 차감된 상태가 남을 수 있습니다. 주문 DB를 롤백하는 것만으로 차감은 복구되지 않습니다.</p><p>포인트 차감 취소라는 보상 작업과, 취소 실패 시 다시 확인할 기록·대사 절차가 필요합니다.</p></aside>
+        <div class="lab-intro"><span class="lab-label">05 · 실습 — 실패 지점으로 확인하기</span><b>정상 → DB 변경 전 → 응답 유실 → DB 커밋 실패 순서로 누르세요.</b><p>각 장면에서 주문 DB와 포인트 서비스에 실제로 남은 효과를 따로 추적합니다.</p><p class="observe">볼 것: 로컬 예외 하나만으로 원격 시스템의 성공·실패를 확정할 수 있는가</p></div>
+        <div class="grid-2">
+          <div class="card">
+            <h3>실패 지점을 선택하세요</h3>
+            <div class="segmented" role="group" aria-label="실패 지점 선택">
+              <button class="active" data-failstep="none">정상</button>
+              <button data-failstep="before">DB 변경 전</button>
+              <button data-failstep="response">B 처리 후 응답 유실</button>
+              <button data-failstep="commit">B 성공 후 DB 커밋 실패</button>
+            </div>
+            <div class="sequence" id="syncSequence">
+              <div class="step">트랜잭션 시작</div><div class="step">주문 DB 변경</div><div class="step">포인트 API</div><div class="step">응답 수신</div><div class="step">DB 커밋</div>
+            </div>
+            <div id="consistencyResult" class="callout" aria-live="polite"></div>
+          </div>
+
+        </div>
+      </div>
+    </section>
+
+    <section id="async">
+      <div class="shell">
+        <div class="section-head">
+          <div><div class="eyebrow">07 · Async boundary</div><h2>빨리 응답한 것과 작업을 지킨 것은 다르다</h2></div>
+          <p><span class="badge book">BOOK</span> 별도 스레드 · <span class="badge bridge">BRIDGE</span> blocking/non-blocking, 내구성</p>
+        </div>
+        <aside class="card topic-primer" aria-label="단어 정의와 요약"><h3>01 · 단어 정의</h3><dl class="term-list"><div><dt>비동기</dt><dd>현재 흐름이 작업 완료를 기다리지 않고 진행할 수 있는 방식</dd></div><div><dt>Executor</dt><dd>제출받은 작업을 스레드와 큐를 이용해 실행하는 구성 요소</dd></div><div><dt>블로킹</dt><dd>결과를 기다리는 동안 해당 호출의 실행 흐름이 멈추는 것</dd></div></dl><div class="topic-tldr"><h3>02 · 핵심 요약</h3><p>빨리 응답해도 실제 업무는 남습니다. 누가 기다리고, 작업이 어디에 저장되며, 실패를 누가 처리하는지 확인합니다.</p></div></aside>
+        <div class="card lesson-copy">
+          <h3>비동기는 “동시에 실행한다”보다 “완료를 나중에 다룬다”에 가깝다</h3>
+          <h4>무엇이 먼저 끝나고 무엇이 남나?</h4>
+          <ul class="explanation-points"><li>동기 호출에서는 포인트 지급 결과가 돌아와야 로그인이나 주문 요청의 다음 줄을 실행합니다.</li><li>비동기 호출에서는 작업을 다른 실행 주체에게 넘기고 현재 흐름은 먼저 진행합니다.</li><li>따라서 사용자에게 빠르게 응답할 수 있지만, 응답 이후에도 포인트 지급이라는 실제 업무는 계속 남아 있습니다.</li></ul>
+          <h4>비동기와 논블로킹은 같은 말인가?</h4>
+          <ul class="explanation-points"><li>여기서 자주 섞이는 용어가 동기·비동기와 블로킹·논블로킹입니다.</li><li>동기·비동기는 완료 결과를 같은 제어 흐름에서 확인하는지에 관한 말이고, 블로킹·논블로킹은 기다리는 동안 현재 실행 스레드가 멈추는지에 관한 말입니다.</li><li>별도 스레드에서 기존 `RestClient` 호출을 실행하면 원래 요청 스레드는 빨리 풀리지만, 별도 스레드는 여전히 네트워크 응답을 기다리는 블로킹 호출을 수행합니다.</li></ul>
+          <ol class="storyline">
+            <li><div><b>요청 스레드</b>가 비동기 작업을 executor에 제출합니다.</div></li>
+            <li><div>큐에 자리가 있으면 작업이 대기하고, 작업 스레드가 비면 실행됩니다.</div></li>
+            <li><div>요청 스레드는 실제 작업 완료보다 먼저 사용자에게 응답할 수 있습니다.</div></li>
+            <li><div>비동기 작업의 실패는 이미 끝난 사용자 요청으로 되돌아갈 수 없으므로 별도의 재시도·로그·상태 저장이 필요합니다.</div></li>
+          </ol>
+          <div class="concept-grid">
+            <div class="concept"><b>풀 크기</b>동시에 실행할 작업 수를 제한합니다. 너무 크면 외부 서비스와 JVM에 과부하를 줄 수 있습니다.</div>
+            <div class="concept"><b>큐 크기</b>당장 실행하지 못한 작업을 메모리에 보관합니다. 무제한 큐는 지연과 메모리 사용을 숨깁니다.</div>
+            <div class="concept"><b>거절 정책</b>풀과 큐가 모두 찼을 때 호출자 실행, 즉시 실패, 폐기 등 어떤 결정을 할지 정합니다.</div>
+          </div>
+          <div class="callout danger"><strong>메모리 큐는 업무 기록이 아니다</strong>프로세스가 재시작되면 executor 큐에 있던 작업은 사라질 수 있습니다. 반드시 처리해야 하는 업무라면 DB나 내구성 있는 브로커에 작업 의도를 먼저 기록해야 합니다.</div>
+          <h4>`@Async`가 붙었다고 항상 비동기로 실행되지는 않는다</h4>
+          <ul class="explanation-points"><li>Spring의 기본 방식은 프록시가 메서드 호출을 가로채 executor에 제출하는 구조입니다.</li><li>같은 객체 안에서 자기 메서드를 직접 호출하면 프록시를 지나지 않아 기대한 비동기 실행이 적용되지 않을 수 있습니다.</li><li>또한 `void` 비동기 메서드의 예외는 원래 호출자의 `try-catch`에 도달하지 않으므로 별도 예외 처리와 실패 기록이 필요합니다.</li></ul>
+          <p class="micro-summary">아래 표에서 “사용자에게 언제 답하는가”와 “작업이 어디에 보존되는가”를 따로 비교하세요. 응답 속도와 신뢰성은 서로 다른 축입니다.</p>
+        </div>
+        <div class="card">
+            <div class="comparison-list"><article class="comparison-item"><h4><b>동기 HTTP</b></h4><dl class="record-fields"><div><dt>사용자 응답</dt><dd>B 결과 뒤</dd></div><div><dt>대기 장소</dt><dd>A의 요청 스레드</dd></div><div><dt>프로세스가 죽으면</dt><dd>요청 실패</dd></div><div><dt>주요 책임</dt><dd>타임아웃·격리·결과 불명확</dd></div></dl></article><article class="comparison-item"><h4><b>별도 스레드</b></h4><dl class="record-fields"><div><dt>사용자 응답</dt><dd>작업 완료 전 가능</dd></div><div><dt>대기 장소</dt><dd>A의 executor 큐와 스레드</dd></div><div><dt>프로세스가 죽으면</dt><dd>메모리 작업 유실 가능</dd></div><div><dt>주요 책임</dt><dd>풀·큐·거절·예외·종료</dd></div></dl></article><article class="comparison-item"><h4><b>메시지 브로커</b></h4><dl class="record-fields"><div><dt>사용자 응답</dt><dd>브로커 접수 뒤 가능</dd></div><div><dt>대기 장소</dt><dd>브로커 backlog</dd></div><div><dt>프로세스가 죽으면</dt><dd>내구 설정에 따라 복구</dd></div><div><dt>주요 책임</dt><dd>유실·중복·순서·지연·스키마</dd></div></dl></article></div>
+          <div class="grid-2" style="margin-top:20px">
+            <div class="callout"><strong>동기/비동기</strong>완료를 같은 흐름에서 확인하는가, 나중에 알게 되는가?</div>
+            <div class="callout warn"><strong>블로킹/논블로킹</strong>기다리는 동안 현재 실행 스레드가 멈추는가? 별도 스레드에서 blocking HTTP를 실행해도 그 호출 자체가 non-blocking이 되지는 않습니다.</div>
+          </div>
+          <details style="margin-top:18px" open data-default-open>
+            <summary>Spring `@Async`를 사용할 때</summary>
+            <ul><li>기본 프록시 방식에서는 프록시를 거친 호출만 가로챕니다. 같은 객체 내부의 자기 호출은 기대와 다르게 동작할 수 있습니다.</li><li>작업은 `TaskExecutor`에 제출됩니다. 풀뿐 아니라 큐 크기와 거절 정책을 정해야 합니다.</li><li>`void` 비동기 메서드의 예외는 원래 호출자에게 전달되지 않습니다. 별도 예외 처리와 관찰이 필요합니다.</li><li>호출 스레드의 DB 트랜잭션이 비동기 스레드로 그대로 이어진다고 기대하면 안 됩니다.</li><li>MDC, 보안 정보, tracing context의 전파 여부를 확인합니다.</li></ul>
+          </details>
+        </div>
+<aside class="example-box"><h3>04 · 예시로 연결하기</h3><p>비유: 직원이 주문 확인 문자를 다른 직원에게 맡기고 고객에게 먼저 답합니다. 고객 응대는 끝났지만 문자 발송은 아직 남아 있습니다.</p><p>같은 앱의 메모리 큐에만 맡긴 뒤 앱이 종료되면 미처리 작업이 사라질 수 있습니다.</p><p>이 비유는 역할 분리만 설명합니다. “다른 직원에게 맡김” 자체가 영속 저장이나 성공 보장을 뜻하지는 않습니다.</p></aside>
+        <div class="lab-intro"><span class="lab-label">05 · 실습</span><b>연결 방식 실험에서 세 방식의 차이를 다시 확인하세요.</b><p>작업을 맡긴 직후 A가 종료되면 무엇이 남을지 먼저 예측해보세요.</p><a href="#map">동기·스레드·브로커 비교 실험으로 이동 →</a></div>
+      </div>
+    </section>
+
+    <section id="messaging">
+      <div class="shell">
+        <div class="section-head">
+          <div><div class="eyebrow">08 · Messaging</div><h2>지연을 버퍼링하면 새 책임이 생긴다</h2></div>
+          <p><span class="badge book">BOOK</span> 메시징·이벤트·커맨드 · <span class="badge deep">DEEP</span> 전달 보장과 멱등 소비자</p>
+        </div>
+        <aside class="card topic-primer" aria-label="단어 정의와 요약"><h3>01 · 단어 정의</h3><dl class="term-list"><div><dt>브로커</dt><dd>생산자가 보낸 메시지를 받아 소비자에게 전달하는 중간 시스템</dd></div><div><dt>Backlog</dt><dd>아직 처리하지 못해 남아 있는 메시지</dd></div><div><dt>ACK</dt><dd>메시지를 받거나 처리했다는 확인 신호. 정확한 의미는 시스템·설정에 따라 다릅니다.</dd></div></dl><div class="topic-tldr"><h3>02 · 핵심 요약</h3><p>큐는 속도 차이를 흡수할 뿐 일을 없애지 않습니다. 밀린 양과 중복 전달에 대비해야 합니다.</p></div></aside>
+        <div class="card lesson-copy">
+          <h3>메시지 브로커는 A와 B 사이에 시간을 저장한다</h3>
+          <h4>중간에 브로커를 두면 무엇이 바뀌나?</h4>
+          <ul class="explanation-points"><li>동기 HTTP에서는 A가 B의 처리 가능 여부를 즉시 마주합니다.</li><li>메시징에서는 A가 처리할 내용을 메시지로 만들어 브로커에 맡기고, B의 소비자가 자기 속도에 맞춰 가져갑니다.</li><li>B가 잠시 느려져도 브로커에 여유가 있다면 A는 B의 순간 처리 속도와 분리됩니다.</li><li>이것을 느슨한 결합이라고 부르지만, B의 일이 사라진 것은 아니며 처리되지 않은 양은 <span class="term">backlog</span>로 쌓입니다.</li></ul>
+          <h4>빠른 접수 응답 뒤에 무엇이 쌓이나?</h4>
+          <ul class="explanation-points"><li>생산 속도가 초당 100건이고 소비 속도가 초당 80건이면 매초 20건씩 밀립니다.</li><li>사용자는 주문 접수 응답을 빨리 받아도 포인트 지급 완료는 점점 늦어집니다.</li><li>따라서 비동기 시스템에서는 API 응답 시간뿐 아니라 큐 깊이, 가장 오래된 메시지의 나이, 소비 지연, 실패·재시도율을 관찰해야 합니다.</li></ul>
+          <h4>왜 같은 메시지가 다시 올까?</h4>
+          <ul class="explanation-points"><li>소비자가 포인트를 정상 반영한 뒤 브로커에 완료 확인을 보내기 전에 죽었다고 합시다.</li><li>브로커는 처리가 끝났다는 사실을 알지 못하므로 같은 메시지를 다시 전달할 수 있습니다.</li><li>반대로 완료 확인을 너무 일찍 보내고 실제 처리 전에 죽으면 메시지는 완료된 것으로 보이지만 업무는 반영되지 않습니다.</li><li>분산 시스템에서 처리 결과와 확인 신호 사이에는 항상 이런 작은 간극이 생길 수 있습니다.</li></ul>
+          <div class="concept-grid">
+            <div class="concept"><b>At-most-once</b>중복 처리를 피하는 대신 실패 구간에서 메시지를 잃을 수 있습니다.</div>
+            <div class="concept"><b>At-least-once</b>유실 가능성을 줄이는 대신 같은 메시지가 둘 이상 도착할 수 있습니다.</div>
+            <div class="concept"><b>Effectively-once</b>중복이 올 수 있음을 인정하고 멱등 처리와 기록으로 업무 효과를 한 번처럼 만듭니다.</div>
+          </div>
+          <h4>멱등 소비자의 기본 모양</h4>
+          <ul class="explanation-points"><li>메시지에 고유 ID를 부여하고, 소비자는 업무 반영과 “이 ID를 처리했다”는 기록을 가능한 한 같은 DB 트랜잭션에서 저장합니다.</li><li>재수신 시 처리 기록이 있으면 업무를 다시 적용하지 않습니다.</li><li>메모리 집합만 사용하면 재시작 때 기록이 사라지고 여러 소비자 인스턴스 사이에서 공유되지 않으므로, 신뢰성이 필요한 경우 DB의 고유 제약 같은 영속적 장치를 사용합니다.</li></ul>
+          <h4>순서 보장도 범위가 있다</h4>
+          <ul class="explanation-points"><li>Kafka처럼 파티션을 사용하는 시스템에서는 보통 같은 파티션 안의 순서를 다룹니다.</li><li>주문 ID를 키로 사용하면 같은 주문의 이벤트가 같은 파티션으로 가도록 설계할 수 있지만, 서로 다른 주문 사이의 전역 순서까지 보장되는 것은 아닙니다.</li><li>소비자 병렬성을 높일수록 순서 보장 범위와 처리량 사이의 선택이 생깁니다.</li></ul>
+          <div class="callout warn"><strong>제품 이름보다 필요한 보장을 먼저 정한다</strong>메시지를 다시 읽어야 하는지, 한 소비자만 처리할지 여러 구독자가 볼지, 순서 범위가 어디인지, 얼마나 오래 보관할지부터 정한 뒤 Kafka·RabbitMQ·Redis Pub/Sub 같은 제품을 비교해야 합니다.</div>
+          <p class="micro-summary">첫 실험에서는 생산과 소비 속도를 바꾸고, 다음 실험에서는 같은 메시지를 두 번 전달해보세요. 멱등 소비자를 켰을 때 처리 횟수와 업무 결과가 어떻게 분리되는지 확인합니다.</p>
+        </div>
+        <div class="grid-2" style="margin-top:22px">
+          <div class="card">
+            <h3>커맨드: 누군가에게 일을 요청한다</h3>
+            <p><b>“주문 42의 포인트 100점을 지급하라”</b>처럼 수행할 작업, 대상, 의도가 들어갑니다. 보통 책임질 논리적 수신자가 있으며 성공·거절·재시도 같은 처리 결과가 중요합니다.</p>
+            <ul><li>명령형 이름: <code>GrantPoints</code>, <code>SendDeliveryNotice</code></li><li>업무상 한 번만 실행돼야 한다면 command ID와 멱등 키가 필요</li><li>유효 기간이 지난 커맨드를 실행해도 되는지 만료 정책을 정의</li><li>처리 불가능한 메시지는 재시도만 반복하지 말고 별도 격리</li></ul>
+            <p class="micro-summary">커맨드를 여러 소비자가 각자 다른 의미로 처리하게 만들면 책임 소재가 흐려집니다.</p>
+          </div>
+          <div class="card">
+            <h3>이벤트: 이미 일어난 사실을 알린다</h3>
+            <p><b>“주문 42가 접수됐다”</b>처럼 과거형 사실을 담습니다. 발행자는 누가 반응할지 몰라도 되며, 포인트·알림·분석 소비자가 독립적으로 구독할 수 있습니다.</p>
+            <ul><li>사실형 이름: <code>OrderPlaced</code>, <code>DeliveryCompleted</code></li><li>이미 일어난 사실이므로 소비자가 없다고 발행 사실이 취소되지는 않음</li><li>새 소비자를 추가해도 생산자 코드를 바꾸지 않는 확장성이 장점</li><li>payload와 의미가 바뀌므로 schema version·호환성 규칙이 필요</li></ul>
+            <p class="micro-summary">이벤트에 “누가 무엇을 하라”는 지시를 숨기면 사실 통지와 작업 명령의 경계가 무너집니다.</p>
+          </div>
+        </div>
+        <aside class="example-box"><h3>04 · 예시로 연결하기</h3><p>예시: 주문 이벤트가 초당 100개 들어오는데 포인트 소비자는 80개만 처리합니다. 미처리 메시지는 매초 20개씩 증가합니다.</p><p>또 소비자가 100점을 지급한 직후 완료 확인 전에 종료되면 같은 메시지가 재전달될 수 있습니다.</p><p>아래 두 실험은 각각 “처리가 밀리는 문제”와 “같은 일이 두 번 반영되는 문제”를 따로 보여줍니다.</p></aside>
+        <div class="lab-intro"><span class="lab-label">05 · 실습 — backlog와 중복을 따로 확인하기</span><b>먼저 생산 속도를 소비 속도보다 크게 만들고, 그다음 같은 메시지를 두 번 전달하세요.</b><p>두 번째 실험은 초기화 → 멱등 꺼짐에서 2회 전달 → 초기화 → 멱등 켜짐에서 2회 전달 순서가 가장 명확합니다.</p><p class="observe">볼 것: 메시지 도착 횟수와 포인트 반영 횟수가 반드시 같아야 하는가</p></div>
+        <div class="grid-2">
+          <div class="card">
+            <h3>생산 속도와 소비 속도</h3>
+            <div class="control-grid" style="grid-template-columns:repeat(2,minmax(0,1fr))">
+              <div class="control"><label for="produceRate">생산 <output id="produceRateOut">8/s</output></label><input id="produceRate" type="range" min="1" max="20" value="8"></div>
+              <div class="control"><label for="consumeRate">소비 <output id="consumeRateOut">5/s</output></label><input id="consumeRate" type="range" min="1" max="20" value="5"></div>
+            </div>
+            <div class="broker" style="margin-top:24px">
+              <div class="node">주문 서비스<small>producer</small></div><div class="arrow">→</div><div><b>broker backlog</b><div id="queueVisual" class="queue"></div></div><div class="arrow">→</div><div class="node">포인트 소비자<small>consumer</small></div>
+            </div>
+            <p id="queueExplain" class="explain"></p>
+          </div>
+          <div class="card">
+            <h3>중복 메시지 실험</h3>
+            <div class="failure-buttons">
+              <button id="deliverMessage">메시지 1회 전달</button>
+              <button id="redeliverMessage">같은 메시지 재전달</button>
+              <button id="toggleIdempotent">멱등 소비자: 꺼짐</button>
+              <button id="resetLedger">초기화</button>
+            </div>
+            <div class="ledger" style="margin-top:16px" aria-live="polite">
+              <div class="ledger-row"><span>메시지 ID</span><b>point-001</b></div>
+              <div class="ledger-row"><span>포인트 잔액</span><b id="pointsBalance">0</b></div>
+              <div class="ledger-row"><span>처리 횟수</span><b id="processCount">0</b></div>
+              <div class="ledger-row"><span>최근 결과</span><b id="ledgerResult">대기</b></div>
+            </div>
+            <div class="callout warn" style="margin-top:14px"><strong>At-least-once의 현실</strong>생산자나 소비자가 성공했지만 확인을 받기 전에 실패하면 같은 메시지가 다시 도착할 수 있습니다. 소비자는 중복을 견디도록 설계합니다.</div>
+          </div>
+        </div>
+
+        <div class="callout" style="margin-top:18px"><strong>Kafka·RabbitMQ·Redis Pub/Sub은 같은 ‘큐’가 아니다</strong>저장, 재처리, 소비 방식, 순서와 확장 모델이 다릅니다. Kafka는 같은 키의 이벤트를 같은 파티션에 두면 그 파티션 안의 순서를 다룰 수 있지만, 전역 순서라고 확대해석하면 안 됩니다.</div>
+      </div>
+    </section>
+
+    <section id="outbox">
+      <div class="shell">
+        <div class="section-head">
+          <div><div class="eyebrow">09 · Durable handoff</div><h2>아웃박스로 발행 의도를 DB에 남긴다</h2></div>
+          <p><span class="badge book">BOOK</span> 트랜잭셔널 아웃박스·배치·CDC · <span class="badge deep">DEEP</span> 중복과 offset</p>
+        </div>
+        <aside class="card topic-primer" aria-label="단어 정의와 요약"><h3>01 · 단어 정의</h3><dl class="term-list"><div><dt>Outbox</dt><dd>업무 DB 안에 발행할 메시지를 함께 저장하는 테이블</dd></div><div><dt>Relay</dt><dd>남아 있는 메시지를 읽어 외부로 전송하는 중계 작업</dd></div><div><dt>CDC</dt><dd>DB에서 발생한 데이터 변경을 포착해 전달하는 방식</dd></div></dl><div class="topic-tldr"><h3>02 · 핵심 요약</h3><p>업무 변경과 발행 의도를 함께 저장합니다. 전송은 나중에 복구할 수 있지만 중복 전송까지 저절로 사라지는 것은 아닙니다.</p></div></aside>
+        <div class="card lesson-copy">
+          <h3>DB 저장과 메시지 발행 사이의 구멍</h3>
+          <h4>단순히 저장 후 전송하면 왜 부족한가?</h4>
+          <ul class="explanation-points"><li>주문을 저장한 뒤 `OrderPlaced` 메시지를 발행한다고 합시다.</li><li>DB를 먼저 커밋하고 발행하면, 커밋 직후 프로세스가 죽을 때 주문은 존재하지만 메시지는 없습니다.</li><li>반대로 메시지를 먼저 발행하면, 메시지를 본 소비자가 일을 시작한 뒤 주문 DB 변경이 롤백될 수 있습니다.</li><li>서로 다른 시스템인 DB와 브로커를 단순한 코드 순서만으로 원자적으로 만들 수 없기 때문에 생기는 문제입니다.</li></ul>
+          <h4>아웃박스는 무엇을 함께 남기나?</h4>
+          <ul class="explanation-points"><li><span class="term">트랜잭셔널 아웃박스</span>는 업무 데이터와 발행할 메시지를 같은 DB 안에 저장합니다.</li><li>두 행은 하나의 로컬 트랜잭션으로 함께 커밋되거나 함께 롤백됩니다.</li><li>이후 별도의 relay가 아웃박스 행을 읽어 브로커로 전송합니다.</li><li>이로써 “주문은 저장됐지만 발행해야 한다는 사실 자체가 사라지는” 문제를 막습니다.</li></ul>
+          <ol class="storyline">
+            <li><div>주문 행과 고유 event ID를 가진 outbox 행을 같은 트랜잭션에서 작성합니다.</div></li>
+            <li><div>커밋이 끝나면 사용자의 주문과 발행 의도가 함께 살아남습니다.</div></li>
+            <li><div>relay가 WAITING 행을 가져가 브로커로 발행합니다.</div></li>
+            <li><div>발행 성공 뒤 DONE으로 표시하거나 마지막 처리 위치를 갱신합니다.</div></li>
+            <li><div>중간에 죽으면 남은 WAITING 행을 재처리합니다. 발행 성공 직후 죽었다면 중복 발행이 가능하므로 소비자는 멱등해야 합니다.</div></li>
+          </ol>
+          <div class="concept-grid">
+            <div class="concept"><b>Outbox가 보장하는 것</b>업무 변경과 발행 의도가 DB에 함께 남는 로컬 원자성</div>
+            <div class="concept"><b>Outbox가 보장하지 않는 것</b>브로커 전송과 DONE 기록 사이의 완전한 exactly-once</div>
+            <div class="concept"><b>운영 시 볼 것</b>WAITING 건수, 가장 오래된 행의 나이, 재시도 횟수, 실패 사유와 정리 정책</div>
+          </div>
+          <h4>폴링 relay와 CDC relay</h4>
+          <ul class="explanation-points"><li>폴링 방식은 애플리케이션이 일정 간격으로 outbox 테이블을 조회합니다.</li><li>이해하고 운영하기 쉽지만 조회 간격만큼 지연이 생기며, 여러 relay가 같은 행을 집지 않도록 잠금 또는 claim 전략이 필요합니다.</li><li>CDC 방식은 DB의 WAL이나 binlog에서 커밋된 outbox 변경을 읽습니다.</li><li>지연을 줄이고 주기적 조회를 피할 수 있지만 커넥터, offset, replication slot, 스키마 변경과 로그 보존을 운영해야 합니다.</li></ul>
+          <h4>CDC는 도메인 이벤트와 같은가?</h4>
+          <ul class="explanation-points"><li>CDC가 관찰하는 기본 사실은 “어떤 테이블의 어떤 행이 바뀌었다”입니다.</li><li>반면 `OrderPlaced` 같은 도메인 이벤트는 “업무적으로 주문이 접수됐다”는 의미를 전달합니다.</li><li>비밀번호 칼럼이 바뀌었다는 row change만으로 사용자가 비밀번호를 변경했는지 관리자가 초기화했는지 알 수 없는 것처럼, 데이터 변경만으로 업무 의미가 충분하지 않을 수 있습니다.</li><li>그래서 도메인 의미를 담은 outbox 행을 CDC로 전달하는 조합이 자주 사용됩니다.</li></ul>
+          <p class="micro-summary">아래 단계 실행에서 커밋 전, 커밋 후, 발행 후에 각각 장애를 넣어보세요. 재시작 뒤 어떤 정보가 남아 복구를 가능하게 하는지가 핵심입니다.</p>
+        </div>
+        <div class="grid-2" style="margin-top:22px">
+          <div class="card">
+            <h3>배치 전송</h3>
+            <p>배치는 여러 건을 모아 정해진 시각이나 크기 기준으로 전달합니다. 정산처럼 “다음 날 오전까지”가 계약이라면 건별 실시간 API보다 실패 범위와 운영 시점을 명확하게 통제할 수 있습니다. 실시간보다 열등한 방식이 아니라 요구되는 신선도와 복구 방식이 다른 선택입니다.</p>
+            <ol><li>생산자는 특정 시점까지의 레코드를 확정하고 임시 파일에 씁니다.</li><li>건수·합계·checksum 같은 검증 정보를 함께 만듭니다.</li><li>쓰기 완료 뒤 원자적 rename이나 완료 마커로 “완성된 파일”임을 표시합니다.</li><li>소비자는 예약 시각에 파일을 가져와 형식과 검증 값을 확인합니다.</li><li>처리한 파일명 또는 business key를 기록하고 성공 파일은 보관 경로로 이동합니다.</li></ol>
+            <h4>반드시 계약할 것</h4>
+            <ul><li>누가 업로드/다운로드하며 시간대와 마감 시각은 무엇인가</li><li>파일명, 문자 인코딩, 구분자, escape, 날짜·금액 형식과 schema version</li><li>빈 파일은 “데이터 0건”인지 생성 실패인지</li><li>부분 파일·중복 파일·늦은 파일·누락 파일을 어떻게 구별하고 알릴지</li><li>재실행 범위와 checkpoint/watermark를 어디에 기록할지</li></ul>
+          </div>
+          <div class="card">
+            <h3>CDC</h3>
+            <p>일반적인 <b>log-based CDC(Change Data Capture)</b>는 애플리케이션 쿼리를 주기적으로 조회하는 대신 DB의 커밋된 변경 로그—PostgreSQL WAL, MySQL binlog 등—를 읽습니다. 처리기는 마지막으로 읽은 위치를 저장하고 INSERT·UPDATE·DELETE 변경을 대상 DB나 메시지 브로커에 전달합니다.</p>
+            <ol><li>기존 데이터가 필요하면 초기 snapshot을 만들고 그동안의 로그 위치를 연결합니다.</li><li>커밋된 변경을 순서대로 읽어 row key, 변경 전후 값, 연산 종류를 change record로 만듭니다.</li><li>대상에 전달한 뒤 offset/LSN을 안전하게 갱신합니다.</li><li>재시작하면 저장한 위치부터 다시 읽습니다. 경계에서 중복이 생길 수 있으므로 대상 반영도 멱등해야 합니다.</li></ol>
+            <h4>도입하면 새로 운영할 것</h4>
+            <ul><li>offset 유실·초기 snapshot과 이후 change stream 연결</li><li>스키마 변경, 테이블 rename, 삭제와 tombstone 의미</li><li>복제 슬롯·로그 보존·커넥터 지연 때문에 DB 로그가 쌓이는 문제</li><li>민감 칼럼이 변경 로그와 여러 소비자로 확산되지 않도록 하는 통제</li><li>CDC row change를 업무 의미가 있는 도메인 이벤트로 변환할 책임</li></ul>
+            <div class="callout warn"><strong>보장 범위 주의</strong>DB에서 커밋 순서로 읽는 것과 모든 토픽·소비자·대상 시스템에서 전역 exactly-once가 성립하는 것은 다릅니다.</div>
+          </div>
+        </div>
+        <aside class="example-box"><h3>04 · 예시로 연결하기</h3><p>비유: 주문 장부와 “발송할 안내장 목록”을 한 번에 기록합니다. 발송 담당자가 중단돼도 목록을 보고 다시 이어갈 수 있습니다.</p><p>하지만 안내장을 보낸 직후 “발송 완료” 표시 전에 중단되면 같은 안내장을 다시 보낼 수 있습니다.</p><p>아웃박스도 발행 의도를 보존합니다. 소비자는 고유 메시지 ID 등으로 중복 업무 효과를 막아야 합니다.</p></aside>
+        <div class="lab-intro"><span class="lab-label">05 · 실습 — 장애 뒤 남는 기록 확인하기</span><b>‘다음 단계’를 눌러 DB 커밋까지 진행한 뒤 장애와 재시작을 차례로 눌러보세요.</b><p>다시 초기화한 뒤에는 브로커 발행까지 진행하고 장애를 내어 중복 발행 가능성을 비교합니다.</p><p class="observe">볼 것: 커밋 전에는 함께 사라지고, 커밋 뒤에는 WAITING 행이 남으며, 발행 뒤에는 중복 가능성이 남는다</p></div>
+        <div class="grid-2">
+          <div class="card">
+            <h3>아웃박스 단계 실행</h3>
+            <div id="outboxSequence" class="sequence">
+              <div class="step">업무 데이터 저장</div><div class="step">outbox 저장</div><div class="step">DB 커밋</div><div class="step">브로커 발행</div><div class="step">DONE 기록</div>
+            </div>
+            <div class="failure-buttons">
+              <button id="nextOutbox">다음 단계</button>
+              <button id="crashOutbox">현재 지점에서 장애</button>
+              <button id="restartOutbox">프로세스 재시작</button>
+              <button id="resetOutbox">초기화</button>
+            </div>
+            <div id="outboxExplain" class="callout" style="margin-top:16px" aria-live="polite"></div>
+          </div>
+          <div class="card">
+            <h3>아웃박스 레코드</h3>
+            <dl id="outboxRow" class="record-fields" aria-live="polite"><div><dt>이벤트 ID / event_id</dt><dd>evt-001</dd></div><div><dt>이벤트 종류 / type</dt><dd>OrderPlaced</dd></div><div><dt>주문 ID</dt><dd>order-42</dd></div><div><dt>발행 상태</dt><dd id="outboxStatus">아직 없음</dd></div><div><dt>발행 시도 횟수</dt><dd id="outboxAttempt">0</dd></div></dl>
+            <div class="callout good" style="margin-top:16px"><strong>무엇을 해결하나?</strong>업무 데이터와 “이 이벤트를 발행해야 한다”는 의도를 같은 로컬 DB 트랜잭션에 저장합니다.</div>
+            <div class="callout danger" style="margin-top:12px"><strong>무엇이 남나?</strong>브로커 전송 성공 뒤 DONE 기록 전에 죽으면 재발행될 수 있습니다. 소비자 멱등성과 중복 탐지가 여전히 필요합니다.</div>
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+    <section id="check">
+      <div class="shell">
+        <div class="section-head">
+          <div><div class="eyebrow">10 · Transfer check</div><h2>이제 설명할 수 있는가?</h2></div>
+          <p>정답을 외우기보다 실패 지점을 옮겼을 때 어떤 자원과 책임이 바뀌는지 말해봅니다.</p>
+        </div>
+        <div class="card lesson-copy">
+          <h3>책을 읽지 않은 사람도 이렇게 사용하면 된다</h3>
+          <ol class="storyline">
+            <li><div><b>1차 읽기</b> 단어 정의와 핵심 요약을 먼저 읽습니다. 짧게 나뉜 설명과 예시를 통해 뜻을 연결한 뒤 실험으로 넘어갑니다.</div></li>
+            <li><div><b>예측</b> 조작하기 전에 “B가 느려지면 어떤 숫자가 먼저 늘까?”처럼 결과를 먼저 말합니다.</div></li>
+            <li><div><b>실험</b> 슬라이더와 장애 버튼을 하나씩 바꾸고, 설명 문장의 원인과 결과를 다시 연결합니다.</div></li>
+            <li><div><b>설명 교대</b> 한 사람은 장애를 만들고 다른 사람은 점유 자원, 사용자 결과, 복구 책임을 1분 안에 설명합니다.</div></li>
+            <li><div><b>실습 연결</b> 마지막에는 같은 현상을 실제 Spring 서비스의 metric·로그·DB 상태로 관찰합니다.</div></li>
+          </ol>
+          <p class="micro-summary">정답의 기준은 패턴 이름을 많이 말하는 것이 아니라 “실패했을 때 무엇이 남고, 누가 다시 처리하며, 중복을 어떻게 막는가”를 끝까지 설명하는 것입니다.</p>
+        </div>
+        <div class="grid-2">
+          <div class="card"><h3>4장 확인</h3><ol><li>B 지연이 왜 A의 스레드와 HTTP 풀을 포화시키는가?</li><li>읽기 타임아웃 뒤 B가 성공했을 가능성은 어떻게 다룰까?</li><li>재시도, 동시성 제한, 벌크헤드, 서킷 브레이커는 각각 무엇을 보호할까?</li><li>풀을 크게 하면 처리량이 반드시 늘지 않는 이유는?</li></ol></div>
+          <div class="card"><h3>5장 확인</h3><ol><li>별도 스레드와 메시지 브로커는 작업 보존 측면에서 어떻게 다른가?</li><li>at-least-once 소비에서 중복 지급을 어떻게 막을까?</li><li>아웃박스를 사용해도 중복 발행 가능성이 남는 이유는?</li><li>CDC 변경 레코드와 도메인 이벤트는 왜 같지 않은가?</li></ol></div>
+        </div>
+        <div class="reset-row"><button id="resetAll" class="reset">모든 조작 초기화</button></div>
+      </div>
+    </section>
+
+    <section id="sources">
+      <div class="shell">
+        <div class="section-head">
+          <div><div class="eyebrow">Sources</div><h2>근거와 더 깊이 보기</h2></div>
+          <p>교재 4장 89–112쪽, 5장 113–146쪽을 학습 순서에 맞춰 재구성하고 아래 공식 자료로 생략된 경계를 보완했습니다.</p>
+        </div>
+        <div class="card">
+          <ul class="source-list">
+            <li><a href="https://docs.spring.io/spring-framework/reference/integration/rest-clients.html">Spring Framework — REST Clients</a>: RestClient와 request factory</li>
+            <li><a href="https://hc.apache.org/components/httpcomponents-client-5.6.x/connection-management.html">Apache HttpComponents — Connection management</a>: route별·전체 풀 제한</li>
+            <li><a href="https://projectreactor.io/docs/netty/release/reference/http-client.html">Reactor Netty — HTTP Client</a>: connection provider와 pool 설정</li>
+            <li><a href="https://docs.spring.io/spring-framework/reference/integration/scheduling.html">Spring Framework — Task Execution and Scheduling</a>: @Async와 예외 처리</li>
+            <li><a href="https://resilience4j.readme.io/docs/getting-started">Resilience4j</a>: retry, circuit breaker, rate limiter, bulkhead</li>
+            <li><a href="https://kafka.apache.org/documentation/">Apache Kafka Documentation</a>: partition 순서와 생산자·소비자 모델</li>
+            <li><a href="https://debezium.io/documentation/reference/stable/transformations/outbox-event-router.html">Debezium — Outbox Event Router</a>: outbox 기반 데이터 교환</li>
+            <li><a href="https://debezium.io/documentation/reference/stable/connectors/postgresql.html">Debezium PostgreSQL Connector</a>: snapshot, WAL, LSN과 offset</li>
+          </ul>
+          <p class="explain">외부 링크는 추가 학습용이며, 이 HTML의 설명과 인터랙션은 네트워크 연결 없이도 동작합니다.</p>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer><div class="shell">개인 스터디용 학습 도구 · 교재 원문과 이미지를 복제하지 않고 개념과 실험 관계를 재구성했습니다.</div></footer>
+
+  <script>
+    (function () {
+      'use strict';
+      const $ = (id) => document.getElementById(id);
+      const all = (selector) => Array.from(document.querySelectorAll(selector));
+
+      const modeCopy = {
+        sync: { user:'응답 대기', a:'B 응답 대기', node:'포인트 서비스 B', b:'요청 처리', title:'동기 HTTP', text:'A는 B의 결과를 같은 요청 흐름에서 기다립니다. B가 느리면 사용자 응답과 A의 자원 점유 시간도 함께 늘어납니다.' },
+        thread: { user:'빠른 응답 가능', a:'executor에 제출', node:'A의 작업 스레드', b:'B를 대신 기다림', title:'별도 스레드', text:'요청 스레드는 빨리 반환할 수 있지만 작업은 A 프로세스 메모리와 executor에 남습니다. 큐 포화, 예외, 프로세스 종료를 직접 책임져야 합니다.' },
+        broker: { user:'접수 후 응답 가능', a:'메시지 발행', node:'메시지 브로커', b:'작업을 보관', title:'메시지 브로커', text:'작업을 내구성 있는 중간 지점에 맡기면 A와 B의 처리 시간을 분리할 수 있습니다. 대신 유실, 중복, 순서, backlog를 운영해야 합니다.' }
+      };
+      function renderMode(mode) {
+        all('[data-mode]').forEach(b => b.classList.toggle('active', b.dataset.mode === mode));
+        const c = modeCopy[mode];
+        $('userState').textContent = c.user; $('aState').textContent = c.a;
+        $('thirdNode').childNodes[0].nodeValue = c.node; $('bState').textContent = c.b;
+        $('modeConclusion').innerHTML = '<strong>' + c.title + '</strong>' + c.text;
+      }
+      all('[data-mode]').forEach(btn => btn.addEventListener('click', () => renderMode(btn.dataset.mode)));
+
+      function setMeter(id, pct, status) {
+        const el = $(id); el.style.width = Math.max(2, Math.min(100, pct)) + '%';
+        el.style.background = status === 'bad' ? 'var(--red)' : status === 'warn' ? 'var(--amber)' : 'var(--green)';
+      }
+      function updateSaturation() {
+        const arrival = +$('arrival').value, latency = +$('latency').value, threads = +$('threads').value, limit = +$('httpLimit').value;
+        $('arrivalOut').textContent = arrival + ' req/s'; $('latencyOut').textContent = latency + ' ms'; $('threadsOut').textContent = threads; $('httpLimitOut').textContent = limit;
+        const slots = Math.min(threads, limit), capacity = Math.floor(slots * 1000 / latency), inflight = Math.ceil(arrival * latency / 1000);
+        const overflow = Math.max(0, arrival - capacity), util = arrival / Math.max(1, capacity);
+        const p95 = util < .75 ? latency * 1.3 : util < 1 ? latency * (1.3 + util * 2) : latency * (3 + Math.min(8, util * 2));
+        $('capacityMetric').textContent = capacity + '/s'; $('inflightMetric').textContent = inflight; $('queueMetric').textContent = overflow + '/s'; $('p95Metric').textContent = Math.round(p95) + ' ms';
+        setMeter('capacityBar', Math.min(100, arrival / Math.max(1, capacity) * 100), util >= 1 ? 'bad' : util > .75 ? 'warn' : 'good');
+        setMeter('inflightBar', inflight / Math.max(1, slots) * 100, inflight > slots ? 'bad' : inflight > slots*.75 ? 'warn' : 'good');
+        setMeter('queueBar', overflow / Math.max(1, arrival) * 100, overflow ? 'bad' : 'good');
+        setMeter('p95Bar', p95 / 6000 * 100, p95 > 3000 ? 'bad' : p95 > 1000 ? 'warn' : 'good');
+        $('saturationExplain').innerHTML = inflight > slots
+          ? '<b>포화:</b> B가 느려져 필요한 동시 요청 ' + inflight + '개가 허용 슬롯 ' + slots + '개를 넘었습니다. 매초 약 ' + overflow + '개가 완료 속도보다 더 들어와 대기가 누적됩니다.'
+          : '<b>여유:</b> 필요한 동시 요청 ' + inflight + '개를 현재 슬롯 ' + slots + '개가 수용합니다. 다만 응답 시간이 더 길어지면 같은 유입량에서도 필요한 동시성이 증가합니다.';
+      }
+      ['arrival','latency','threads','httpLimit'].forEach(id => $(id).addEventListener('input', updateSaturation));
+
+      function updateTimeouts() {
+        const vals = { pool:+$('poolWait').value, connect:+$('connectDelay').value, response:+$('responseDelay').value, deadline:+$('deadline').value };
+        $('poolWaitOut').textContent = vals.pool+' ms'; $('connectDelayOut').textContent = vals.connect+' ms'; $('responseDelayOut').textContent = vals.response+' ms'; $('deadlineOut').textContent = vals.deadline+' ms';
+        $('poolPhaseValue').textContent=vals.pool+' ms'; $('connectPhaseValue').textContent=vals.connect+' ms'; $('responsePhaseValue').textContent=vals.response+' ms';
+        $('poolBar').style.width=Math.min(100,vals.pool/20)+'%'; $('connectBar').style.width=Math.min(100,vals.connect/20)+'%'; $('responseBar').style.width=Math.min(100,vals.response/50)+'%';
+        const total = vals.pool + vals.connect + 50 + vals.response;
+        const result = $('timeoutResult');
+        if (total > vals.deadline) { result.className='timeout-flag failed'; result.textContent='전체 '+total+'ms → deadline '+vals.deadline+'ms 초과. 호출자는 실패를 보지만 원격 작업의 실제 상태는 별도 확인이 필요합니다.'; }
+        else { result.className='timeout-flag'; result.textContent='전체 '+total+'ms → 현재 deadline 안에 응답합니다.'; }
+      }
+      ['poolWait','connectDelay','responseDelay','deadline'].forEach(id => $(id).addEventListener('input', updateTimeouts));
+
+      function updatePool() {
+        const size=+$('poolSize').value, requests=+$('requestCount').value, streams=+$('streams').value, capacity=size*streams;
+        $('poolSizeOut').textContent=size; $('requestCountOut').textContent=requests; $('streamsOut').textContent=streams+(streams===1?' · HTTP/1.1식':' · 다중화 모형');
+        $('connectionSlots').innerHTML='';
+        for(let i=0;i<size;i++){ const used=Math.min(streams,Math.max(0,requests-i*streams)); const d=document.createElement('div'); d.className='slot '+(used?'busy':'idle'); d.textContent=used?used+'/'+streams+' 사용':'유휴'; $('connectionSlots').appendChild(d); }
+        $('requestStack').innerHTML='';
+        for(let i=0;i<Math.min(12,requests);i++){ const d=document.createElement('div'); d.className='request-dot '+(i>=capacity?'wait':''); d.title=i>=capacity?'풀 앞에서 대기':'연결/스트림 할당'; $('requestStack').appendChild(d); }
+        const wait=Math.max(0,requests-capacity);
+        $('poolExplain').innerHTML='<strong>'+(wait?'대기 발생':'즉시 할당')+'</strong>현재 모형의 동시 운반 능력은 '+size+' × '+streams+' = '+capacity+'개입니다. '+(wait?wait+'개 요청이 풀 앞에서 기다립니다. 풀을 키우면 대기는 줄 수 있지만 B의 처리 한도를 넘기면 장애 전파가 커질 수 있습니다.':'모든 요청이 즉시 연결 또는 스트림을 할당받습니다.');
+      }
+      ['poolSize','requestCount','streams'].forEach(id => $(id).addEventListener('input', updatePool));
+
+      const retryPositions={ immediate:[5,12,19,26], fixed:[5,30,55,80], expo:[5,18,42,88], jitter:[5,23,48,79] };
+      const retryText={ immediate:'모두 곧바로 재시도해 일시 장애가 끝나기 전에 요청을 몰아넣기 쉽습니다.', fixed:'간격은 생기지만 많은 호출자가 같은 주기로 움직이면 재시도 시점이 다시 겹칠 수 있습니다.', expo:'실패할수록 간격을 늘려 B가 회복할 시간을 줍니다.', jitter:'백오프 간격에 무작위 흔들림을 넣어 여러 호출자의 재시도가 같은 시각에 겹치는 현상을 줄입니다.' };
+      function renderRetry(kind){
+        all('[data-retry]').forEach(b=>b.classList.toggle('active',b.dataset.retry===kind)); $('retryTrack').innerHTML='';
+        retryPositions[kind].forEach((p,i)=>{const d=document.createElement('div');d.className='attempt '+(i===3?'ok':'');d.style.left='calc('+p+'% - 21px)';d.textContent=i+1;d.setAttribute('aria-label',(i+1)+'번째 시도');$('retryTrack').appendChild(d);});
+        $('retryExplain').textContent=retryText[kind];
+      }
+      all('[data-retry]').forEach(b=>b.addEventListener('click',()=>renderRetry(b.dataset.retry)));
+
+      let circuit={state:'closed', failures:0}, circuitGuideStep=0;
+      const circuitGuideLabels=['안내 시나리오 시작','다음: 실패 2회째','다음: 실패 3회 → OPEN','다음: OPEN의 새 요청','다음: 차단 시간 경과','다음: HALF-OPEN 시험 성공','안내 시나리오 다시 보기'];
+      function renderCircuit(msg){
+        ['closed','open','half'].forEach(s=>$(s+'State').className='state'+(circuit.state===s?' active '+s:''));
+        const remote=circuit.state==='open'?'차단함':circuit.state==='half'?'시험 요청만':'전달함';
+        $('circuitStateMetric').textContent=circuit.state==='half'?'HALF-OPEN':circuit.state.toUpperCase();
+        $('circuitRemoteMetric').textContent=remote;
+        $('circuitFailureMetric').textContent=circuit.failures+' / 3';
+        $('circuitExplain').innerHTML='<b>지금 볼 것:</b> '+msg;
+        $('nextCircuit').textContent=circuitGuideLabels[Math.min(circuitGuideStep,circuitGuideLabels.length-1)];
+      }
+      function recordCircuitFailure(){
+        if(circuit.state==='half'){circuit.state='open';renderCircuit('시험 호출이 실패했습니다. B가 회복되지 않았으므로 다시 OPEN으로 돌아가 호출을 차단합니다.');return;}
+        if(circuit.state==='closed'){circuit.failures++;if(circuit.failures>=3){circuit.state='open';renderCircuit('실패 임계치 3회에 도달했습니다. 이제부터 새 요청은 B로 보내지 않고 A에서 빠르게 실패합니다.');}else renderCircuit('실패를 기록했지만 아직 임계치 전입니다. CLOSED이므로 다음 요청도 B로 전달합니다.');return;}
+        renderCircuit('OPEN에서는 요청을 B로 보내지 않으므로 새로운 B 실패 결과도 관찰하지 않습니다.');
+      }
+      function recordCircuitSuccess(){
+        if(circuit.state==='half'){circuit={state:'closed',failures:0};renderCircuit('제한적으로 보낸 시험 호출이 성공했습니다. B가 회복됐다고 판단해 CLOSED로 돌아가 정상 전달을 재개합니다.');return;}
+        if(circuit.state==='closed'){circuit.failures=0;renderCircuit('CLOSED에서 성공을 관찰했습니다. 이 모형은 연속 실패 기준이므로 실패 수를 0으로 되돌립니다. 요청은 계속 B로 전달됩니다.');return;}
+        renderCircuit('OPEN에서는 B에 요청하지 않았으므로 성공 결과를 새로 기록할 수 없습니다. 먼저 차단 시간이 지나야 합니다.');
+      }
+      function advanceCircuitTime(){
+        if(circuit.state==='open'){circuit.state='half';renderCircuit('설정된 차단 시간이 지났습니다. 모든 요청을 여는 대신 소수의 시험 요청만 B로 보냅니다.');return;}
+        renderCircuit('시간 경과만으로 바뀌는 전이는 OPEN → HALF-OPEN입니다. 현재 상태에서는 변화가 없습니다.');
+      }
+      $('recordFailure').addEventListener('click',recordCircuitFailure);
+      $('recordSuccess').addEventListener('click',recordCircuitSuccess);
+      $('advanceTime').addEventListener('click',advanceCircuitTime);
+      $('nextCircuit').addEventListener('click',()=>{
+        if(circuitGuideStep===0){circuit={state:'closed',failures:0};recordCircuitFailure();}
+        else if(circuitGuideStep===1||circuitGuideStep===2)recordCircuitFailure();
+        else if(circuitGuideStep===3)renderCircuit('현재 OPEN입니다. 새 요청은 B에 도달하지 않고 A가 즉시 실패 또는 fallback 응답을 반환합니다. 이것이 빠른 실패입니다.');
+        else if(circuitGuideStep===4)advanceCircuitTime();
+        else if(circuitGuideStep===5)recordCircuitSuccess();
+        else {circuit={state:'closed',failures:0};circuitGuideStep=-1;renderCircuit('처음 상태입니다. CLOSED에서는 요청을 B로 보내고 결과를 기록합니다.');}
+        circuitGuideStep++;
+        $('circuitGuideText').textContent=circuitGuideStep<6?'버튼을 계속 누르며 강조된 상태, B 전달 여부, 실패 수를 함께 보세요.':'한 바퀴를 마쳤습니다. 아래 자유 실험에서 HALF-OPEN 시험 실패도 확인할 수 있습니다.';
+        $('nextCircuit').textContent=circuitGuideLabels[Math.min(circuitGuideStep,circuitGuideLabels.length-1)];
+      });
+      $('resetCircuit').addEventListener('click',()=>{circuit={state:'closed',failures:0};circuitGuideStep=0;$('circuitGuideText').textContent='한 버튼으로 실패 3회 → OPEN 차단 → 시간 경과 → HALF-OPEN 시험 성공 → CLOSED 복구를 순서대로 보여줍니다.';renderCircuit('처음 상태입니다. CLOSED에서는 요청을 B로 보내고 결과를 기록합니다.');});
+
+      const consistencyCopy={
+        none:{fail:-1,cls:'good',title:'정상',text:'주문 DB와 포인트 지급이 모두 반영됩니다.'},
+        before:{fail:1,cls:'danger',title:'로컬 실패',text:'DB 변경 전 실패이므로 외부 부작용이 없습니다. 로컬 트랜잭션을 종료하면 됩니다.'},
+        response:{fail:3,cls:'danger',title:'결과 불명확',text:'B는 포인트를 지급했지만 A는 응답을 받지 못했습니다. 단순 재시도는 중복 지급을 만들 수 있어 idempotency key 또는 상태 확인이 필요합니다.'},
+        commit:{fail:4,cls:'danger',title:'분산 불일치',text:'B의 포인트 지급은 성공했지만 주문 DB는 롤백됐습니다. 로컬 롤백만으로 원격 부작용을 취소할 수 없으므로 보상 또는 대사가 필요합니다.'}
+      };
+      function renderConsistency(kind){
+        all('[data-failstep]').forEach(b=>b.classList.toggle('active',b.dataset.failstep===kind)); const c=consistencyCopy[kind];
+        all('#syncSequence .step').forEach((s,i)=>{s.className='step '+(i===c.fail?'failed':(c.fail<0||i<c.fail?'done':''));});
+        $('consistencyResult').className='callout '+c.cls; $('consistencyResult').innerHTML='<strong>'+c.title+'</strong>'+c.text;
+      }
+      all('[data-failstep]').forEach(b=>b.addEventListener('click',()=>renderConsistency(b.dataset.failstep)));
+
+      function updateQueue(){
+        const p=+$('produceRate').value,c=+$('consumeRate').value,backlog=Math.max(0,(p-c)*3);
+        $('produceRateOut').textContent=p+'/s'; $('consumeRateOut').textContent=c+'/s'; $('queueVisual').innerHTML='';
+        for(let i=0;i<Math.min(22,backlog);i++){const d=document.createElement('span');d.className='message';$('queueVisual').appendChild(d);}
+        $('queueExplain').innerHTML=backlog?'<b>backlog 증가:</b> 3초마다 약 '+backlog+'개가 쌓입니다. A의 응답은 빨라도 업무 완료 지연은 큐 안에서 증가합니다.':'<b>안정:</b> 소비 속도가 생산 속도를 따라잡아 backlog가 증가하지 않습니다.';
+      }
+      ['produceRate','consumeRate'].forEach(id=>$(id).addEventListener('input',updateQueue));
+
+      let ledger={points:0,count:0,seen:false,idempotent:false};
+      function renderLedger(msg){$('pointsBalance').textContent=ledger.points;$('processCount').textContent=ledger.count;$('ledgerResult').textContent=msg;$('toggleIdempotent').textContent='멱등 소비자: '+(ledger.idempotent?'켜짐':'꺼짐');}
+      function processMessage(redelivery){ if(ledger.idempotent&&ledger.seen){renderLedger('중복 ID를 감지해 무시');return;} ledger.points+=100;ledger.count++;ledger.seen=true;renderLedger(redelivery?'재전달을 다시 처리':'정상 처리'); }
+      $('deliverMessage').addEventListener('click',()=>processMessage(false)); $('redeliverMessage').addEventListener('click',()=>processMessage(true));
+      $('toggleIdempotent').addEventListener('click',()=>{ledger.idempotent=!ledger.idempotent;renderLedger('설정 변경');});
+      $('resetLedger').addEventListener('click',()=>{ledger={points:0,count:0,seen:false,idempotent:ledger.idempotent};renderLedger('대기');});
+
+      let outbox={step:-1,crashed:false,attempt:0,published:false};
+      const outboxMessages=['업무 데이터 저장 준비','업무 데이터와 같은 트랜잭션에서 outbox 행도 저장합니다.','두 저장이 함께 커밋됐습니다. 이제 발행할 의도는 DB에 남아 있습니다.','relay가 브로커에 메시지를 보냅니다.','발행 완료를 기록했습니다.'];
+      function renderOutbox(msg){
+        all('#outboxSequence .step').forEach((s,i)=>{s.className='step '+(i<outbox.step?'done':i===outbox.step?(outbox.crashed?'failed':'active'):'');});
+        let status='아직 없음'; if(outbox.step>=1)status='WAITING'; if(outbox.published)status='PUBLISHED?'; if(outbox.step>=4&&!outbox.crashed)status='DONE'; if(outbox.crashed)status+=' / 중단';
+        $('outboxStatus').textContent=status;$('outboxAttempt').textContent=outbox.attempt;
+        $('outboxExplain').innerHTML='<strong>현재 상태</strong>'+(msg||outboxMessages[Math.max(0,outbox.step)]);
+      }
+      $('nextOutbox').addEventListener('click',()=>{if(outbox.crashed){renderOutbox('프로세스가 중단됐습니다. 먼저 재시작하세요.');return;}if(outbox.step<4){outbox.step++;if(outbox.step===3){outbox.attempt++;outbox.published=true;}renderOutbox();}else renderOutbox('이미 완료됐습니다.');});
+      $('crashOutbox').addEventListener('click',()=>{if(outbox.step<0){outbox.step=0;}outbox.crashed=true;renderOutbox(outbox.published?'브로커 발행은 성공했지만 DONE 기록 전이라면 재시작 후 중복 발행될 수 있습니다.':'커밋 전 장애라면 업무 데이터와 outbox가 함께 롤백되고, 커밋 뒤라면 WAITING 행이 남아 relay가 다시 찾습니다.');});
+      $('restartOutbox').addEventListener('click',()=>{if(!outbox.crashed){renderOutbox('중단 상태가 아닙니다.');return;}outbox.crashed=false;if(outbox.step<2){outbox={step:-1,crashed:false,attempt:0,published:false};renderOutbox('커밋 전 변경은 사라졌습니다. 처음부터 다시 시작합니다.');}else{outbox.step=2;renderOutbox(outbox.published?'WAITING 상태를 다시 읽어 발행합니다. 이미 발행됐다면 중복이 발생할 수 있습니다.':'WAITING 상태를 읽어 발행을 재개합니다.');}});
+      $('resetOutbox').addEventListener('click',()=>{outbox={step:-1,crashed:false,attempt:0,published:false};renderOutbox('초기 상태입니다. 업무 데이터와 outbox가 아직 없습니다.');});
+
+      function initialize(){
+        renderMode('sync'); updateSaturation(); updateTimeouts(); updatePool(); renderRetry('immediate'); renderCircuit('모든 호출을 B로 전달합니다.'); renderConsistency('none'); updateQueue(); renderLedger('대기'); renderOutbox('초기 상태입니다. 업무 데이터와 outbox가 아직 없습니다.');
+        all('details').forEach(detail => { detail.open = detail.hasAttribute('data-default-open'); });
+      }
+      $('resetAll').addEventListener('click',()=>{
+        $('arrival').value=80;$('latency').value=300;$('threads').value=100;$('httpLimit').value=50;
+        $('poolWait').value=100;$('connectDelay').value=200;$('responseDelay').value=900;$('deadline').value=2000;
+        $('poolSize').value=4;$('requestCount').value=7;$('streams').value=1;$('produceRate').value=8;$('consumeRate').value=5;
+        circuit={state:'closed',failures:0};circuitGuideStep=0;ledger={points:0,count:0,seen:false,idempotent:false};outbox={step:-1,crashed:false,attempt:0,published:false};
+        $('circuitGuideText').textContent='한 버튼으로 실패 3회 → OPEN 차단 → 시간 경과 → HALF-OPEN 시험 성공 → CLOSED 복구를 순서대로 보여줍니다.';
+        all('textarea').forEach(t=>t.value='');initialize();
+        const root = document.documentElement, previousScrollBehavior = root.style.scrollBehavior;
+        root.style.scrollBehavior = 'auto'; root.scrollTop = 0; document.body.scrollTop = 0;
+        window.setTimeout(() => { root.style.scrollBehavior = previousScrollBehavior; }, 0);
+      });
+      initialize();
+    })();
+  </script>
+</body>
+</html>

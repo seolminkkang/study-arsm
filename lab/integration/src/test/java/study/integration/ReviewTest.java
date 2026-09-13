@@ -78,4 +78,15 @@ class ReviewTest {
         while((applied.get()==0 || (int)review.worker().get("active")>0) && System.nanoTime()<deadline) Thread.sleep(10);
         assertThat(applied.get()).isEqualTo(1);
     }
+    @Test void outboxCommitsWithReviewWithoutCallingRemote() {
+        review.create(new ReviewController.Review("durable","a"),"outbox","1");
+        assertThat(applied.get()).isZero();
+        assertThat(db.queryForObject("SELECT status FROM outbox WHERE review_id='durable'",String.class)).isEqualTo("WAITING");
+        assertThat(review.list()).hasSize(1);
+    }
+    @Test void outboxInsertFailureRollsBackReview() {
+        db.update("INSERT INTO outbox(review_id,channel) VALUES ('atomic','HTTP')");
+        assertThatThrownBy(()->review.create(new ReviewController.Review("atomic","a"),"outbox","1"));
+        assertThat(db.queryForObject("SELECT count(*) FROM reviews WHERE id='atomic'",Integer.class)).isZero();
+    }
 }

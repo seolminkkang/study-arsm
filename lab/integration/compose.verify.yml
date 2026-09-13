@@ -1,4 +1,5 @@
-name: arsm-integration
+# 사용자 DB/큐와 분리한 검증 전용 환경. 기본 compose.yml과 병합하지 않는다.
+name: arsm-integration-verify
 services:
   db:
     image: postgres:16
@@ -7,49 +8,41 @@ services:
       POSTGRES_USER: integration
       POSTGRES_PASSWORD: integration
       POSTGRES_DB: integration
-    ports: ["127.0.0.1:5434:5432"]
-    volumes: ["integration-data:/var/lib/postgresql/data", "./init.sql:/docker-entrypoint-initdb.d/01.sql:ro"]
+    volumes: ["verify-data:/var/lib/postgresql/data", "./init.sql:/docker-entrypoint-initdb.d/01.sql:ro"]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U integration"]
-      interval: 3s
-      timeout: 3s
-      retries: 20
+      interval: 2s
+      timeout: 2s
+      retries: 30
+  broker:
+    image: rabbitmq:4-alpine
+    environment:
+      RABBITMQ_DEFAULT_USER: integration
+      RABBITMQ_DEFAULT_PASS: integration-local
   review:
-    build: .
+    image: arsm-integration-review:latest
     environment:
       LAB_ROLE: review
       SERVER_ADDRESS: 0.0.0.0
       SERVER_PORT: 8081
       DB_URL: jdbc:postgresql://db:5432/integration?currentSchema=review
       POINTS_URL: http://points:8082
-      HTTP_POOL_SIZE: ${HTTP_POOL_SIZE:-2}
-      HTTP_ACQUIRE_MS: ${HTTP_ACQUIRE_MS:-500}
-      HTTP_CONNECT_MS: ${HTTP_CONNECT_MS:-1000}
-      HTTP_READ_MS: ${HTTP_READ_MS:-1000}
-      DB_POOL_SIZE: ${DB_POOL_SIZE:-4}
-    ports: ["127.0.0.1:8081:8081"]
+      HTTP_READ_MS: 1000
+    ports: ["127.0.0.1:18081:8081"]
     depends_on:
       db: {condition: service_healthy}
-  broker:
-    image: rabbitmq:4-alpine
-    hostname: integration-broker
-    environment:
-      RABBITMQ_NODENAME: rabbit@integration-broker
-      RABBITMQ_DEFAULT_USER: integration
-      RABBITMQ_DEFAULT_PASS: integration-local
-    volumes: ["integration-messages:/var/lib/rabbitmq"]
   points:
-    build: .
+    image: arsm-integration-points:latest
     environment:
       LAB_ROLE: points
       SERVER_ADDRESS: 0.0.0.0
       SERVER_PORT: 8082
       DB_URL: jdbc:postgresql://db:5432/integration?currentSchema=points
-    ports: ["127.0.0.1:8082:8082"]
+    ports: ["127.0.0.1:18082:8082"]
     depends_on:
       db: {condition: service_healthy}
   points-backup:
-    build: .
+    image: arsm-integration-points:latest
     environment:
       LAB_ROLE: points
       LAB_PROVIDER: backup
@@ -57,20 +50,12 @@ services:
       SERVER_ADDRESS: 0.0.0.0
       SERVER_PORT: 8083
       DB_URL: jdbc:postgresql://db:5432/integration?currentSchema=points
-    ports: ["127.0.0.1:8083:8083"]
+    ports: ["127.0.0.1:18083:8083"]
     depends_on:
       db: {condition: service_healthy}
   prometheus:
     image: prom/prometheus:v3.1.0
     volumes: ["./prometheus.yml:/etc/prometheus/prometheus.yml:ro"]
-    ports: ["127.0.0.1:9091:9090"]
-  grafana:
-    image: grafana/grafana:11.5.1
-    environment:
-      GF_SECURITY_ADMIN_USER: lab
-      GF_SECURITY_ADMIN_PASSWORD: integration-local
-    volumes: ["./grafana:/etc/grafana/provisioning:ro"]
-    ports: ["127.0.0.1:3001:3000"]
+    ports: ["127.0.0.1:19091:9090"]
 volumes:
-  integration-data:
-  integration-messages:
+  verify-data:
